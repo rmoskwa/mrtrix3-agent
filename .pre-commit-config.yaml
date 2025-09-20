@@ -1,0 +1,114 @@
+# Pre-commit hooks for PulsePal
+# Run `pre-commit install` to set up the git hook scripts
+# Run `pre-commit run --all-files` to test all hooks
+
+repos:
+  # Ruff - Fast Python linter and formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      # Run the linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        name: ruff lint
+        description: "Run ruff linter on Python files"
+      # Run the formatter
+      - id: ruff-format
+        name: ruff format
+        description: "Run ruff formatter on Python files"
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Check yaml files
+      - id: check-yaml
+        name: check yaml
+        description: "Validate YAML file syntax"
+
+      # Check json files
+      - id: check-json
+        name: check json
+        description: "Validate JSON file syntax"
+
+      # Check toml files
+      - id: check-toml
+        name: check toml
+        description: "Validate TOML file syntax"
+
+      # Remove trailing whitespace
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+        description: "Remove trailing whitespace from all files"
+
+      # Check for large files
+      - id: check-added-large-files
+        name: check for large files
+        description: "Prevent files larger than 500KB from being committed"
+        args: ['--maxkb=500']
+
+      # Check for merge conflict markers
+      - id: check-merge-conflict
+        name: check for merge conflicts
+        description: "Check for files with merge conflict markers"
+
+      # Check for debug statements
+      - id: debug-statements
+        name: check debug statements
+        description: "Check for debugger imports and breakpoint() calls"
+
+      # Additional useful hooks
+      - id: end-of-file-fixer
+        name: fix end of files
+        description: "Ensure files end with a newline"
+
+      - id: mixed-line-ending
+        name: fix mixed line endings
+        description: "Ensure consistent line endings"
+        args: ['--fix=lf']
+
+      - id: check-docstring-first
+        name: check docstring first
+        description: "Ensure docstrings come before code"
+
+      - id: check-builtin-literals
+        name: check builtin literals
+        description: "Require literal syntax for empty containers"
+
+# Optional: Python-specific hooks
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      # Check for common Python issues
+      - id: python-no-log-warn
+        name: no log.warn
+        description: "Use log.warning instead of log.warn"
+
+      - id: python-no-eval
+        name: no eval()
+        description: "Avoid using eval() for security"
+
+      - id: python-check-blanket-noqa
+        name: check blanket noqa
+        description: "Avoid blanket # noqa comments"
+
+# Configuration for specific hooks
+default_language_version:
+  python: python3
+
+# Files to exclude from all hooks
+exclude: |
+  (?x)^(
+    .venv/.*|
+    venv/.*|
+    site/.*|
+    migrations/.*|
+    __pycache__/.*|
+    \.git/.*|
+    \.pytest_cache/.*|
+    \.ruff_cache/.*|
+    docs/_build/.*
+  )$
+
+# Run hooks on all staged files by default
+fail_fast: false

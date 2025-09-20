@@ -1,0 +1,6 @@
+supabase
+google-generativeai
+pydantic
+rich
+python-dotenv
+tenacity

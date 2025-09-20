@@ -1,1 +1,6 @@
 .venv
+.env
+.bmad-core
+.claude
+__pycache__/
+docsInternal/
