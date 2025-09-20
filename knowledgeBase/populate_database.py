@@ -22,6 +22,8 @@ Examples:
 
 Features:
     - Sparse git checkout: Only downloads docs/ and source dirs (~5MB vs 200MB)
+    - Concurrent processing: Processes up to 30 documents in parallel
+    - Rate limiting: Token bucket algorithm respects Gemini 2.5 Flash limits (2000 RPM)
     - Gemini API: Analyzes RST documents for structured extraction
     - Error extraction: Finds error messages from C++/Python source code
     - Smart truncation: Uses strided sampling (30% start, 60% middle, 10% end)
@@ -35,6 +37,7 @@ import json
 import asyncio
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -58,7 +61,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MRTRIX3_REPO = "https://github.com/MRtrix3/mrtrix3.git"
-GEMINI_RATE_LIMIT = 1  # Seconds between Gemini API calls
+GEMINI_CONCURRENT_LIMIT = 30  # Maximum concurrent Gemini API calls
+GEMINI_REQUESTS_PER_SECOND = 30  # Rate limit: 30 req/s (1800 RPM, under 2000 limit)
 
 # Initialize services
 console = Console()
@@ -77,6 +81,42 @@ class DocumentAnalysis(BaseModel):
     concepts: List[str] = []
     synopsis: Optional[str] = None
     command_usage: Optional[str] = None
+
+
+class RateLimiter:
+    """Token bucket rate limiter for API calls"""
+
+    def __init__(self, rate: float, per: float = 1.0):
+        """
+        Args:
+            rate: Number of requests allowed
+            per: Time period in seconds (default 1.0 for per-second)
+        """
+        self.rate = rate
+        self.per = per
+        self.allowance = rate
+        self.last_check = time.monotonic()
+        self.lock = asyncio.Lock()
+
+    async def acquire(self):
+        """Wait if necessary to maintain rate limit"""
+        async with self.lock:
+            current = time.monotonic()
+            time_passed = current - self.last_check
+            self.last_check = current
+
+            # Replenish tokens based on time passed
+            self.allowance += time_passed * (self.rate / self.per)
+            if self.allowance > self.rate:
+                self.allowance = self.rate
+
+            # If not enough tokens, wait
+            if self.allowance < 1.0:
+                sleep_time = (1.0 - self.allowance) * (self.per / self.rate)
+                await asyncio.sleep(sleep_time)
+                self.allowance = 0.0
+            else:
+                self.allowance -= 1.0
 
 
 class RSTDocumentGatherer:
@@ -133,18 +173,41 @@ class RSTDocumentGatherer:
 
             console.print("[green]✅ Successfully fetched docs and source code")
 
-            # Get version
-            version_result = subprocess.run(
-                ["git", "describe", "--tags", "--always"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-            )
-            version = (
-                version_result.stdout.strip()
-                if version_result.returncode == 0
-                else "latest"
-            )
+            # Get the most recent release tag (not commit hash)
+            try:
+                # First, fetch all tags
+                subprocess.run(
+                    ["git", "fetch", "--tags"],
+                    cwd=repo_path,
+                    check=True,
+                    capture_output=True,
+                )
+
+                # Get the most recent tag that looks like a version (e.g., 3.0.7)
+                version_result = subprocess.run(
+                    ["git", "tag", "-l", "--sort=-version:refname"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
+
+                if version_result.returncode == 0 and version_result.stdout.strip():
+                    # Filter for semantic version tags (e.g., 3.0.7, not dev tags)
+                    tags = version_result.stdout.strip().split("\n")
+                    for tag in tags:
+                        # Match tags like 3.0.7, 3.0.0, etc.
+                        if re.match(r"^\d+\.\d+\.\d+$", tag.strip()):
+                            version = tag.strip()
+                            break
+                    else:
+                        # If no semantic version found, use the first tag
+                        version = tags[0].strip() if tags else "latest"
+                else:
+                    version = "latest"
+
+            except subprocess.CalledProcessError:
+                # Fallback to "latest" if tags fetch fails
+                version = "latest"
 
             # Gather all RST files
             docs_dir = repo_path / "docs"
@@ -231,6 +294,7 @@ class GeminiRSTAnalyzer:
 
     def __init__(self):
         self.model = generativeai.GenerativeModel("gemini-2.5-flash")
+        self.rate_limiter = RateLimiter(rate=GEMINI_REQUESTS_PER_SECOND, per=1.0)
 
     def _smart_truncate(self, content: str, max_chars: int = 32000) -> str:
         """
@@ -293,6 +357,9 @@ class GeminiRSTAnalyzer:
         - References use :ref: or [Name]_
         - Code blocks use :: or .. code-block::
         """
+
+        # Apply rate limiting
+        await self.rate_limiter.acquire()
 
         # Smart content truncation to preserve key sections
         # Increased to 32K - only 1 file out of 186 exceeds this
@@ -516,7 +583,6 @@ class DocumentProcessor:
             return None
 
         # Analyze with Gemini
-        await asyncio.sleep(GEMINI_RATE_LIMIT)  # Rate limiting
         analysis = await self.analyzer.analyze_rst_document(
             doc["title"], doc["content"], doc["doc_type"], doc["path"]
         )
@@ -592,7 +658,7 @@ class DocumentProcessor:
                 console.print("[yellow]No new documents to process")
                 return
 
-            # Process documents
+            # Process documents concurrently in batches
             processed_docs = []
             with Progress(
                 "[progress.description]{task.description}",
@@ -604,11 +670,23 @@ class DocumentProcessor:
                     "Processing documents...", total=len(documents)
                 )
 
-                for doc in documents:
-                    result = await self.process_document(doc, version)
-                    if result:
-                        processed_docs.append(result)
-                    progress.advance(task)
+                # Process in concurrent batches
+                for i in range(0, len(documents), GEMINI_CONCURRENT_LIMIT):
+                    batch = documents[i : i + GEMINI_CONCURRENT_LIMIT]
+
+                    # Create tasks for concurrent processing
+                    tasks = [self.process_document(doc, version) for doc in batch]
+
+                    # Wait for all tasks in batch to complete
+                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # Handle results
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            logger.warning(f"Error processing document: {result}")
+                        elif result:
+                            processed_docs.append(result)
+                        progress.advance(task)
 
             # Insert into database
             if processed_docs:
