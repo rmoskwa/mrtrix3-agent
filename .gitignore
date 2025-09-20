@@ -3,4 +3,5 @@
 .bmad-core
 .claude
 __pycache__/
+CLAUDE.md
 docsInternal/

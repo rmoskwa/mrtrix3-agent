@@ -27,12 +27,12 @@ Features:
     - Gemini API: Analyzes RST documents for structured extraction
     - Error extraction: Finds error messages from C++/Python source code
     - Smart truncation: Uses strided sampling (30% start, 60% middle, 10% end)
+    - Embeddings: Generates vector embeddings for semantic search
     - Database validation: Ensures all fields meet Supabase constraints
     - Progress tracking: Rich terminal UI with progress bars
 """
 
 import os
-import re
 import json
 import asyncio
 import subprocess
@@ -53,13 +53,19 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.table import Table
 
+# Import the ErrorExtractor from the separate module
+from .error_extractor import ErrorExtractor
+
+# Import the EmbeddingGenerator
+from .generate_embeddings import EmbeddingGenerator
+
 # Load environment variables
 load_dotenv()
 
 # Configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")  # Use the main Google API key for analysis
 MRTRIX3_REPO = "https://github.com/MRtrix3/mrtrix3.git"
 GEMINI_CONCURRENT_LIMIT = 30  # Maximum concurrent Gemini API calls
 GEMINI_REQUESTS_PER_SECOND = 30  # Rate limit: 30 req/s (1800 RPM, under 2000 limit)
@@ -156,58 +162,77 @@ class RSTDocumentGatherer:
                 capture_output=True,
             )
 
+            # Initialize sparse-checkout (needed for older Git versions)
+            subprocess.run(
+                ["git", "sparse-checkout", "init", "--cone"],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+            )
+
             # Set sparse checkout for docs AND source code directories
             subprocess.run(
                 [
                     "git",
                     "sparse-checkout",
                     "set",
-                    "docs/",
-                    "cpp/cmd/",  # C++ commands for error extraction
-                    "python/mrtrix3/commands/",  # Python commands for error extraction
+                    "docs",
+                    "cmd",  # C++ commands for error extraction
+                    "bin",  # Python command scripts (full implementations)
                 ],
                 cwd=repo_path,
                 check=True,
                 capture_output=True,
             )
 
+            # Verify that the sparse checkout actually downloaded the files
+            cmd_path = repo_path / "cmd"
+            if cmd_path.exists():
+                cpp_files = list(cmd_path.glob("*.cpp"))
+                console.print(
+                    f"[green]✅ Sparse checkout downloaded {len(cpp_files)} C++ command files"
+                )
+            else:
+                console.print(
+                    "[yellow]⚠ Warning: cmd directory not found after sparse checkout"
+                )
+
+            bin_path = repo_path / "bin"
+            if bin_path.exists():
+                py_scripts = [f for f in bin_path.iterdir() if f.is_file()]
+                console.print(
+                    f"[green]✅ Sparse checkout downloaded {len(py_scripts)} Python scripts in bin/"
+                )
+            else:
+                console.print(
+                    "[yellow]⚠ Warning: bin directory not found after sparse checkout"
+                )
+
             console.print("[green]✅ Successfully fetched docs and source code")
 
-            # Get the most recent release tag (not commit hash)
+            # Get the most recent release tag from GitHub API
             try:
-                # First, fetch all tags
-                subprocess.run(
-                    ["git", "fetch", "--tags"],
-                    cwd=repo_path,
-                    check=True,
-                    capture_output=True,
-                )
+                import urllib.request
+                import json as json_module
 
-                # Get the most recent tag that looks like a version (e.g., 3.0.7)
-                version_result = subprocess.run(
-                    ["git", "tag", "-l", "--sort=-version:refname"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True,
-                )
-
-                if version_result.returncode == 0 and version_result.stdout.strip():
-                    # Filter for semantic version tags (e.g., 3.0.7, not dev tags)
-                    tags = version_result.stdout.strip().split("\n")
-                    for tag in tags:
-                        # Match tags like 3.0.7, 3.0.0, etc.
-                        if re.match(r"^\d+\.\d+\.\d+$", tag.strip()):
-                            version = tag.strip()
-                            break
+                # Query GitHub API for latest release
+                api_url = "https://api.github.com/repos/MRtrix3/mrtrix3/releases/latest"
+                with urllib.request.urlopen(api_url, timeout=5) as response:
+                    data = json_module.loads(response.read())
+                    if "tag_name" in data:
+                        tag = data["tag_name"]
+                        # Remove 'v' prefix if present
+                        version = tag.lstrip("v")
+                        console.print(
+                            f"[green]✓ Found version from GitHub API: {version}"
+                        )
                     else:
-                        # If no semantic version found, use the first tag
-                        version = tags[0].strip() if tags else "latest"
-                else:
-                    version = "latest"
+                        version = "latest"
 
-            except subprocess.CalledProcessError:
-                # Fallback to "latest" if tags fetch fails
+            except Exception:
+                # Fallback to "latest" if API call fails
                 version = "latest"
+                console.print(f"[yellow]⚠ Using fallback version: {version}")
 
             # Gather all RST files
             docs_dir = repo_path / "docs"
@@ -221,8 +246,8 @@ class RSTDocumentGatherer:
                 with open(rst_file, "r", encoding="utf-8") as f:
                     content = f.read()
 
-                # Extract title from RST
-                title = self.extract_rst_title(content)
+                # Use the filename as the title
+                title = rst_file.name
 
                 # Determine doc type from path and content
                 doc_type = self.classify_doc_type(rst_file, content)
@@ -251,24 +276,6 @@ class RSTDocumentGatherer:
         except subprocess.CalledProcessError as e:
             logger.error(f"Git operation failed: {e}")
             raise
-
-    def extract_rst_title(self, content: str) -> str:
-        """Extract title from RST content"""
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if i + 1 < len(lines):
-                next_line = lines[i + 1]
-                # RST titles are underlined with =, -, ~, etc.
-                if (
-                    next_line
-                    and all(c in '=-~^"*+' for c in next_line.strip())
-                    and len(next_line.strip()) >= 3
-                ):
-                    title = line.strip()
-                    # Remove RST formatting like *emphasis*
-                    title = re.sub(r"\*([^*]+)\*", r"\1", title)
-                    return title
-        return "Untitled"
 
     def classify_doc_type(self, file_path: Path, content: str) -> str:
         """Classify document type based on path and content (database constraint: command, tutorial, guide, reference)"""
@@ -471,72 +478,14 @@ class GeminiRSTAnalyzer:
         # Ensure synopsis exists and is reasonable length
         if not data.get("synopsis"):
             data["synopsis"] = f"Documentation for {title}"
-        elif len(data["synopsis"]) > 500:
-            data["synopsis"] = data["synopsis"][:497] + "..."
+        elif len(data["synopsis"]) > 1500:
+            data["synopsis"] = data["synopsis"][:1497] + "..."
 
         # Validate command_usage length
-        if data.get("command_usage") and len(data["command_usage"]) > 500:
-            data["command_usage"] = data["command_usage"][:497] + "..."
+        if data.get("command_usage") and len(data["command_usage"]) > 1500:
+            data["command_usage"] = data["command_usage"][:1497] + "..."
 
         return data
-
-
-class ErrorExtractor:
-    """Extract error patterns from MRtrix3 source code"""
-
-    def __init__(self, source_path: Path):
-        """Initialize with path to MRtrix3 source (from sparse checkout)"""
-        self.source_path = source_path
-
-    def extract_from_command(self, command_name: str) -> Optional[List[str]]:
-        """Extract error messages for a specific command"""
-        errors = []
-
-        # Look for C++ command file
-        cpp_file = self.source_path / "cpp" / "cmd" / f"{command_name}.cpp"
-        if cpp_file.exists():
-            errors.extend(self.extract_from_file(cpp_file))
-
-        # Look for Python command file
-        py_file = (
-            self.source_path / "python" / "mrtrix3" / "commands" / f"{command_name}.py"
-        )
-        if py_file.exists():
-            errors.extend(self.extract_from_file(py_file))
-
-        return errors if errors else None
-
-    def extract_from_file(self, file_path: Path) -> List[str]:
-        """Extract error patterns from a source file"""
-        errors = []
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            # C++ error patterns
-            cpp_patterns = [
-                r'throw\s+Exception\s*\(\s*"([^"]+)"',
-                r'WARN\s*\(\s*"([^"]+)"',
-                r'ERROR\s*\(\s*"([^"]+)"',
-            ]
-
-            # Python error patterns
-            py_patterns = [
-                r'raise\s+\w+Error\s*\(\s*["\']([^"\']+)["\']',
-                r'app\.error\s*\(\s*["\']([^"\']+)["\']',
-                r'app\.warn\s*\(\s*["\']([^"\']+)["\']',
-            ]
-
-            patterns = cpp_patterns if file_path.suffix == ".cpp" else py_patterns
-
-            for pattern in patterns:
-                matches = re.findall(pattern, content)
-                errors.extend(matches)
-
-        except Exception as e:
-            logger.warning(f"Error extracting from {file_path}: {e}")
-
-        return list(set(errors))  # Remove duplicates
 
 
 class SupabaseManager:
@@ -553,14 +502,24 @@ class SupabaseManager:
     def insert_documents(self, documents: List[Dict[str, Any]]) -> bool:
         """Insert documents into database"""
         try:
-            # Add UUIDs
+            # Add UUIDs and ensure error_types is properly serialized
             for doc in documents:
                 doc["id"] = str(uuid4())
+                # Ensure error_types is JSON serializable (it should already be a dict)
+                if doc.get("error_types") and not isinstance(
+                    doc["error_types"], (dict, type(None))
+                ):
+                    logger.warning(
+                        f"Invalid error_types type: {type(doc['error_types'])}"
+                    )
 
             self.client.table("documents").insert(documents).execute()
             return True
         except Exception as e:
             logger.error(f"Error inserting documents: {e}")
+            logger.error(
+                f"Document structure: {documents[0] if documents else 'empty'}"
+            )
             return False
 
 
@@ -571,6 +530,7 @@ class DocumentProcessor:
         self.gatherer = RSTDocumentGatherer()
         self.analyzer = GeminiRSTAnalyzer()
         self.error_extractor = None  # Will be initialized with repo path
+        self.embedding_generator = EmbeddingGenerator()
         self.db_manager = SupabaseManager()
 
     async def process_document(
@@ -688,6 +648,42 @@ class DocumentProcessor:
                             processed_docs.append(result)
                         progress.advance(task)
 
+            # Generate embeddings for all processed documents
+            if processed_docs:
+                console.print(
+                    f"\n[cyan]Generating embeddings for {len(processed_docs)} documents..."
+                )
+
+                # Generate embeddings with progress tracking
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("Generating embeddings...", total=None)
+
+                    # Add embeddings to documents
+                    for doc in processed_docs:
+                        embedding = (
+                            await self.embedding_generator.generate_document_embedding(
+                                doc
+                            )
+                        )
+                        if embedding:
+                            doc["content_embedding"] = embedding
+                        else:
+                            doc["content_embedding"] = None
+
+                    progress.remove_task(task)
+
+                # Count successful embeddings
+                successful_embeddings = sum(
+                    1 for doc in processed_docs if doc.get("content_embedding")
+                )
+                console.print(
+                    f"[green]✓ Generated {successful_embeddings}/{len(processed_docs)} embeddings"
+                )
+
             # Insert into database
             if processed_docs:
                 console.print(
@@ -709,6 +705,7 @@ class DocumentProcessor:
         from collections import Counter
 
         doc_types = Counter(doc["doc_type"] for doc in documents)
+        embeddings_count = sum(1 for doc in documents if doc.get("content_embedding"))
 
         table = Table(title="Processing Summary")
         table.add_column("Metric", style="cyan")
@@ -717,6 +714,7 @@ class DocumentProcessor:
         table.add_row("Total Documents", str(len(documents)))
         for dtype, count in doc_types.most_common():
             table.add_row(f"  - {dtype}", str(count))
+        table.add_row("Embeddings Generated", str(embeddings_count))
 
         console.print("\n", table)
 
