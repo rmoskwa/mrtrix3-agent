@@ -6,6 +6,7 @@ import logging
 from typing import List
 import google.generativeai as genai
 from google.api_core import retry, exceptions
+from .rate_limiter import embedding_limiter
 
 logger = logging.getLogger("agent.embedding")
 
@@ -45,6 +46,9 @@ class EmbeddingService:
             TimeoutError: If API request times out.
             ConnectionError: If network connection fails.
         """
+        # Apply rate limiting before making API call
+        await embedding_limiter.acquire()
+
         try:
             # Use retry decorator for transient errors
             @retry.Retry(

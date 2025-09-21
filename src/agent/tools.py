@@ -11,6 +11,7 @@ from typing import List
 from pydantic_ai import RunContext, ModelRetry
 from .models import DocumentResult, SearchKnowledgebaseDependencies
 from .embedding_service import EmbeddingService
+from .circuit_breaker import supabase_circuit_breaker, CircuitBreakerError
 
 logger = logging.getLogger("agent.tools")
 
@@ -61,24 +62,33 @@ async def search_knowledgebase(
         # Fall back to BM25 search
         return await _bm25_fallback(ctx, sanitized_query)
 
-    # Perform cosine similarity search using RPC function
+    # Perform cosine similarity search using RPC function with circuit breaker
     try:
-        results = await ctx.deps.supabase_client.rpc(
-            "match_documents",
-            {
-                "query_embedding": embedding,
-                "match_threshold": getattr(ctx.deps.config, "similarity_threshold", 0.7)
-                if hasattr(ctx.deps, "config")
-                else 0.7,
-                "match_count": getattr(ctx.deps.config, "max_search_results", 3)
-                if hasattr(ctx.deps, "config")
-                else 3,
-            },
-        ).execute()
+
+        async def rpc_call():
+            return await ctx.deps.supabase_client.rpc(
+                "match_documents",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": getattr(
+                        ctx.deps.config, "similarity_threshold", 0.7
+                    )
+                    if hasattr(ctx.deps, "config")
+                    else 0.7,
+                    "match_count": getattr(ctx.deps.config, "max_search_results", 3)
+                    if hasattr(ctx.deps, "config")
+                    else 3,
+                },
+            ).execute()
+
+        results = await supabase_circuit_breaker.call(rpc_call)
 
         if results.data and len(results.data) > 0:
             return _format_results(results.data[:2])  # Return top-2 from top-3
 
+    except CircuitBreakerError as e:
+        logger.warning(f"Circuit breaker open for vector search: {e}")
+        # Fall back to BM25 search
     except Exception as e:
         logger.warning(f"Vector search failed, falling back to BM25: {e}")
 
@@ -108,17 +118,20 @@ async def _bm25_fallback(
         safe_query = query.replace("%", "\\%").replace("_", "\\_").replace("[", "\\[")
         safe_query = safe_query[:100]  # Limit pattern length for performance
 
-        # Use parameterized query pattern with escaped wildcards
-        table = ctx.deps.supabase_client.from_("documents")
+        async def bm25_query():
+            # Use parameterized query pattern with escaped wildcards
+            table = ctx.deps.supabase_client.from_("documents")
 
-        # Use safe pattern with escaped query
-        pattern = f"%{safe_query}%"
-        results = (
-            await table.select("title, content")
-            .ilike("keywords", pattern)
-            .limit(3)
-            .execute()
-        )
+            # Use safe pattern with escaped query
+            pattern = f"%{safe_query}%"
+            return (
+                await table.select("title, content")
+                .ilike("keywords", pattern)
+                .limit(3)
+                .execute()
+            )
+
+        results = await supabase_circuit_breaker.call(bm25_query)
 
         if results.data:
             return _format_results(results.data[:2])  # Return top-2
@@ -126,6 +139,9 @@ async def _bm25_fallback(
         logger.info(f"No results found for query: {query}")
         return []
 
+    except CircuitBreakerError as e:
+        logger.error(f"Circuit breaker open for BM25 search: {e}")
+        raise ModelRetry(f"Database temporarily unavailable: {e}") from e
     except Exception as e:
         logger.error(f"BM25 search failed: {e}")
         raise ModelRetry(f"Search temporarily unavailable: {e}") from e

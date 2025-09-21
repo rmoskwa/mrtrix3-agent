@@ -20,6 +20,7 @@ from rich.markdown import Markdown
 
 from src.agent.agent import MRtrixAssistant
 from src.agent.async_dependencies import create_async_dependencies
+from src.agent.error_messages import get_user_friendly_message, log_and_get_message
 
 # Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -120,7 +121,15 @@ async def start_conversation():
     console.print("[bold blue]MRtrix3 Assistant[/bold blue]")
     console.print("Ask me anything about MRtrix3! Type '/exit' or Ctrl+C to quit.\n")
 
-    deps = await create_async_dependencies()
+    try:
+        deps = await create_async_dependencies()
+    except Exception as e:
+        error_msg = get_user_friendly_message(e, "connecting to the knowledge base")
+        console.print(f"[red]{error_msg}[/red]")
+        if debug_mode:
+            console.print(f"[dim]Debug: {e}[/dim]")
+        return
+
     agent = MRtrixAssistant(dependencies=deps)
     token_manager = TokenManager()
 
@@ -167,12 +176,21 @@ async def start_conversation():
                 break
 
             except Exception as e:
-                logger.error(f"Error in conversation loop: {e}")
+                # Log error with context and get user-friendly message
+                user_message = log_and_get_message(
+                    e,
+                    severity="error",
+                    user_query=user_input if "user_input" in locals() else None,
+                    tool_name="conversation_loop",
+                )
+
                 if debug_mode:
                     import traceback
 
                     traceback.print_exc()
-                console.print(f"\n[red]Error: {e}[/red]\n")
+                    console.print(f"\n[red]Debug: {e}[/red]")
+
+                console.print(f"\n[yellow]{user_message}[/yellow]\n")
 
     finally:
         # Properly shutdown the executor

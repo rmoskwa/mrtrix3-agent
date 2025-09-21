@@ -319,7 +319,16 @@ class TestStartConversation:
 
         await start_conversation()
 
-        mock_console.print.assert_any_call("\n[red]Error: Test error[/red]\n")
+        # Check that the error was handled and a user-friendly message was displayed
+        # The exact message depends on the error mapper, but it should contain helpful text
+        calls = [str(call) for call in mock_console.print.call_args_list]
+        error_message_found = any(
+            "unexpected issue" in str(call).lower() or "try again" in str(call).lower()
+            for call in calls
+        )
+        assert (
+            error_message_found
+        ), f"Expected user-friendly error message, got calls: {calls}"
 
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
