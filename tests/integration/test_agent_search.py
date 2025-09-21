@@ -41,15 +41,6 @@ async def supabase_client() -> AsyncClient:
     if not url or not key:
         pytest.skip("SUPABASE_URL or SUPABASE_KEY not found in environment")
 
-    # Debug: Print URL format (safely, without exposing full URL)
-    if url:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(url)
-        print(f"DEBUG: Connecting to Supabase at host: {parsed.hostname}")
-        print(f"DEBUG: URL scheme: {parsed.scheme}")
-        print(f"DEBUG: URL has port: {parsed.port is not None}")
-
     return await acreate_client(url, key)
 
 
@@ -139,12 +130,6 @@ class TestSearchIntegration:
     @pytest.mark.asyncio
     async def test_search_with_real_rpc(self, real_context):
         """Test search_knowledgebase with real RPC function (mocked embedding)."""
-        # Debug: Check if the client is real
-        print(f"Client type: {type(real_context.deps.supabase_client)}")
-        print(
-            f"Client URL: {getattr(real_context.deps.supabase_client, 'rest_url', 'unknown')}"
-        )
-
         # Mock only the embedding generation
         with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
             mock_embedding = mock_embedding_class.return_value

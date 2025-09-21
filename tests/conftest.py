@@ -15,16 +15,15 @@ def pytest_configure(config):
     """
     Called before test collection starts.
     """
-    # Only set mock values if not in CI or if the values aren't already set
-    # This allows GitHub Actions to use real secrets for integration tests
-    if not os.getenv("CI"):
-        # Set mock values that will be used during module imports
-        os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
-        os.environ.setdefault("SUPABASE_KEY", "test_key")
-        os.environ.setdefault("GOOGLE_API_KEY", "test_gemini_key")
-        os.environ.setdefault("GOOGLE_API_KEY_EMBEDDING", "test_embedding_key")
-        os.environ.setdefault("EMBEDDING_MODEL", "models/gemini-embedding-001")
-        os.environ.setdefault("EMBEDDING_DIMENSIONS", "768")
+    # Always set defaults for values that don't have secrets (needed for imports)
+    os.environ.setdefault("EMBEDDING_MODEL", "models/gemini-embedding-001")
+    os.environ.setdefault("EMBEDDING_DIMENSIONS", "768")
+
+    # For URL and KEY, use setdefault to allow real secrets in CI
+    os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "test_key")
+    os.environ.setdefault("GOOGLE_API_KEY", "test_gemini_key")
+    os.environ.setdefault("GOOGLE_API_KEY_EMBEDDING", "test_embedding_key")
 
 
 @pytest.fixture
