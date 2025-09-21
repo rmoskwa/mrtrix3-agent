@@ -1,7 +1,21 @@
-.venv
+# Environment
 .env
-.bmad-core
-.claude
+.venv/
+
+# Python
 __pycache__/
-CLAUDE.md
+*.egg-info/
+
+# Testing
+.pytest_cache/
+
+# Tools
+.ruff_cache/
+
+# IDE/Editor
+.claude/
+.bmad-core/
+
+# Development files
 docsInternal/
+CLAUDE.md

@@ -4,7 +4,7 @@ MRtrix3 Documentation RAG Database Populator
 Using sparse git checkout for efficient documentation gathering.
 
 Usage:
-    python -m knowledgeBase.populate_database [options]
+    python -m knowledge_base.populate_database [options]
 
 Options:
     --batch-size N        Process only N documents (useful for testing)
@@ -12,13 +12,13 @@ Options:
 
 Examples:
     # Process all new documents (default)
-    python -m knowledgeBase.populate_database
+    python -m knowledge_base.populate_database
 
     # Test with small batch
-    python -m knowledgeBase.populate_database --batch-size 5
+    python -m knowledge_base.populate_database --batch-size 5
 
     # Reprocess everything (updates existing)
-    python -m knowledgeBase.populate_database --include-existing
+    python -m knowledge_base.populate_database --include-existing
 
 Features:
     - Sparse git checkout: Only downloads docs/ and source dirs (~5MB vs 200MB)
@@ -52,12 +52,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.table import Table
-
-# Import the ErrorExtractor from the separate module
-from .error_extractor import ErrorExtractor
-
-# Import the EmbeddingGenerator
-from .generate_embeddings import EmbeddingGenerator
+from knowledge_base import ErrorExtractor, EmbeddingGenerator
 
 # Load environment variables
 load_dotenv()

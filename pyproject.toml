@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mrtrix3-agent"
+version = "1.0.0"
+description = "MRtrix3 AI Agent"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Robert Moskwa", email = "rmoskwa@wisc.edu"},
+]
+
+dependencies = [
+    "supabase>=2.0.0",
+    "google-generativeai>=0.3.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "tenacity>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",  # For async test support
+    "pytest-cov>=4.1.0",  # For coverage reports
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["knowledge_base*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+    "slow: Tests that take more than a few seconds",
+]
