@@ -6,10 +6,13 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 import pytest_asyncio
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Only load .env if not in CI environment
+if not os.getenv("CI"):
+    from dotenv import load_dotenv
+
+    # Load environment variables
+    load_dotenv()
 
 # Mock Google modules before importing
 sys.modules["google.generativeai"] = MagicMock()
@@ -26,10 +29,11 @@ from src.agent.tools import search_knowledgebase, _bm25_fallback  # noqa: E402
 @pytest_asyncio.fixture
 async def supabase_client() -> AsyncClient:
     """Create real async Supabase client for integration tests."""
-    # Force reload from .env to override test defaults
-    from dotenv import load_dotenv
+    # Only load .env if not in CI environment
+    if not os.getenv("CI"):
+        from dotenv import load_dotenv
 
-    load_dotenv(override=True)
+        load_dotenv(override=True)
 
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_KEY")
