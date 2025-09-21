@@ -16,6 +16,8 @@ authors = [
 dependencies = [
     "supabase>=2.0.0",
     "google-generativeai>=0.3.0",
+    "pydantic-ai>=0.0.1",
+    "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
     "tenacity>=8.0.0",
@@ -30,7 +32,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["knowledge_base*"]
+include = ["knowledge_base*", "agent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -41,10 +43,4 @@ addopts = [
     "-v",
     "--tb=short",
     "--strict-markers",
-]
-markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
-    "e2e: End-to-end tests",
-    "slow: Tests that take more than a few seconds",
 ]

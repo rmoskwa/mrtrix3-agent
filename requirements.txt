@@ -1,6 +1,7 @@
 supabase
 google-generativeai
-pydantic
+pydantic>=2.0
+pydantic-ai
 rich
 python-dotenv
 tenacity
