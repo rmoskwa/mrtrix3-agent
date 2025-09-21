@@ -63,10 +63,8 @@ class TestSearchKnowledgebaseDependencies:
     def test_missing_dependencies(self):
         """Test that missing required dependencies raise validation error."""
         with pytest.raises(ValidationError):
-            SearchKnowledgebaseDependencies(
-                supabase_client="mock_client"
-                # Missing embedding_model which is required
-            )
+            SearchKnowledgebaseDependencies()
+            # Missing supabase_client which is required
 
 
 class TestAgentConfiguration:

@@ -3,6 +3,7 @@
 from pydantic_ai import Agent
 
 from .models import SearchKnowledgebaseDependencies
+from .tools import search_knowledgebase
 
 
 class MRtrixAssistant:
@@ -37,8 +38,8 @@ class MRtrixAssistant:
         self._register_tools()
 
     def _register_tools(self):
-        """Register tools with the agent (placeholder for tool registration)."""
-        pass
+        """Register tools with the agent."""
+        self.agent.tool(search_knowledgebase)
 
     async def run(self, query: str):
         """

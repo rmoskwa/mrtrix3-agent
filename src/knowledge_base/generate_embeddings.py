@@ -17,7 +17,9 @@ load_dotenv()
 
 # Configuration
 GOOGLE_API_KEY_EMBEDDING = os.getenv("GOOGLE_API_KEY_EMBEDDING")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
+if not EMBEDDING_MODEL:
+    raise ValueError("EMBEDDING_MODEL not found in environment")
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "768"))
 
 # Configure logging

@@ -1,7 +1,7 @@
 """Unit tests for MRtrix3 Assistant agent."""
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 from pydantic_ai.models.test import TestModel
@@ -18,7 +18,7 @@ class TestMRtrixAssistant:
         """Test MRtrixAssistant initialization with mock dependencies."""
         mock_deps = SearchKnowledgebaseDependencies(
             supabase_client=MagicMock(),
-            embedding_model=MagicMock(),
+            embedding_model=os.getenv("EMBEDDING_MODEL"),
             rate_limiter=MagicMock(),
         )
 
@@ -31,20 +31,43 @@ class TestMRtrixAssistant:
     @pytest.mark.asyncio
     async def test_agent_run_with_test_model(self):
         """Test agent run method using PydanticAI TestModel."""
-        mock_deps = SearchKnowledgebaseDependencies(
-            supabase_client=MagicMock(),
-            embedding_model=MagicMock(),
-            rate_limiter=MagicMock(),
-        )
+        # Mock the embedding service to prevent actual API calls
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(
+                return_value=[0.1] * 768  # Return dummy embedding
+            )
 
-        assistant = MRtrixAssistant(dependencies=mock_deps)
+            # Create a mock Supabase client with proper async mocks
+            mock_supabase = MagicMock()
 
-        test_model = TestModel()
+            # Mock RPC call
+            mock_rpc_result = MagicMock()
+            mock_rpc_result.execute = AsyncMock(return_value=MagicMock(data=[]))
+            mock_supabase.rpc = MagicMock(return_value=mock_rpc_result)
 
-        with assistant.agent.override(model=test_model):
-            result = await assistant.run("What is MRtrix3?")
+            # Mock BM25 fallback table operations
+            mock_table = MagicMock()
+            mock_table.select = MagicMock(return_value=mock_table)
+            mock_table.ilike = MagicMock(return_value=mock_table)
+            mock_table.limit = MagicMock(return_value=mock_table)
+            mock_table.execute = AsyncMock(return_value=MagicMock(data=[]))
+            mock_supabase.from_ = MagicMock(return_value=mock_table)
 
-        assert result is not None
+            mock_deps = SearchKnowledgebaseDependencies(
+                supabase_client=mock_supabase,
+                embedding_model=os.getenv("EMBEDDING_MODEL"),
+                rate_limiter=MagicMock(),
+            )
+
+            assistant = MRtrixAssistant(dependencies=mock_deps)
+
+            test_model = TestModel()
+
+            with assistant.agent.override(model=test_model):
+                result = await assistant.run("What is MRtrix3?")
+
+            assert result is not None
 
 
 class TestEnvironmentValidation:
