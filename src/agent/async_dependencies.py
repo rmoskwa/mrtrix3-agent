@@ -1,9 +1,9 @@
 """Async dependencies setup for the MRtrix3 agent."""
 
 import os
-from typing import Optional
+from typing import Optional, Any
 from supabase import acreate_client, AsyncClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SkipValidation
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -20,7 +20,7 @@ class AsyncSearchKnowledgebaseDependencies(BaseModel):
         default_factory=lambda: os.getenv("EMBEDDING_MODEL"),
         description="Embedding model name",
     )
-    rate_limiter: Optional[any] = Field(
+    rate_limiter: Optional[SkipValidation[Any]] = Field(
         default=None, description="Agent-specific rate limiting"
     )
 
