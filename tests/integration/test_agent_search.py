@@ -41,6 +41,15 @@ async def supabase_client() -> AsyncClient:
     if not url or not key:
         pytest.skip("SUPABASE_URL or SUPABASE_KEY not found in environment")
 
+    # Debug: Print URL format (safely, without exposing full URL)
+    if url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        print(f"DEBUG: Connecting to Supabase at host: {parsed.hostname}")
+        print(f"DEBUG: URL scheme: {parsed.scheme}")
+        print(f"DEBUG: URL has port: {parsed.port is not None}")
+
     return await acreate_client(url, key)
 
 
