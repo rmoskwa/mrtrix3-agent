@@ -154,8 +154,6 @@ async def start_conversation():
                     )
 
                 result = await agent.run(user_input)
-
-                # PydanticAI AgentRunResult always has an 'output' attribute
                 response_text = result.output
 
                 await token_manager.add_message(response_text)
@@ -165,9 +163,7 @@ async def start_conversation():
                 console.print()
 
             except (KeyboardInterrupt, EOFError):
-                # Accept standard terminal behavior - Ctrl+C shows ^C and exits
-                # EOFError can occur with Ctrl+D
-                print()  # New line after the ^C
+                print()
                 break
 
             except Exception as e:
@@ -197,7 +193,6 @@ async def start_conversation():
 
 async def main():
     """Entry point for CLI application."""
-    # Try both possible key names
     gemini_key = os.getenv("GOOGLE_API_KEY")
     if not gemini_key:
         console.print("[red]Error: GOOGLE_API_KEY not found in environment[/red]")
