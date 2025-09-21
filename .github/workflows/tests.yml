@@ -25,7 +25,7 @@ jobs:
 
     - name: Run unit tests
       run: |
-        pytest tests/unit --cov=knowledge_base --cov-report=xml --cov-report=term
+        pytest tests/agent tests/knowledgeBase --cov=knowledge_base --cov-report=xml --cov-report=term
 
   # --- Stage 2: Integration tests (requires secrets) ---
   integration-tests:
