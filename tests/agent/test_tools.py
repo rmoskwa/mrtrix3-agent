@@ -151,6 +151,48 @@ class TestSearchKnowledgebase:
             results = await search_knowledgebase(mock_context, "nonexistent topic")
             assert results == []
 
+    @pytest.mark.asyncio
+    async def test_search_with_large_results(self, mock_context):
+        """Test search handles large result sets properly."""
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
+
+            # Mock large result set
+            large_results = [
+                {"title": f"Doc{i}", "content": f"Content {i}"} for i in range(10)
+            ]
+            mock_rpc_result = Mock()
+            mock_rpc_result.execute = AsyncMock(return_value=Mock(data=large_results))
+            mock_context.deps.supabase_client.rpc = Mock(return_value=mock_rpc_result)
+
+            results = await search_knowledgebase(mock_context, "test query")
+
+            # Should only return top 2 results even if more are available
+            assert len(results) == 2
+            assert results[0].title == "Doc0"
+
+    @pytest.mark.asyncio
+    async def test_search_with_empty_query(self, mock_context):
+        """Test search with empty query string."""
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
+
+            mock_rpc_result = Mock()
+            mock_rpc_result.execute = AsyncMock(return_value=Mock(data=[]))
+            mock_context.deps.supabase_client.rpc = Mock(return_value=mock_rpc_result)
+
+            mock_table = Mock()
+            mock_table.select = Mock(return_value=mock_table)
+            mock_table.ilike = Mock(return_value=mock_table)
+            mock_table.limit = Mock(return_value=mock_table)
+            mock_table.execute = AsyncMock(return_value=Mock(data=[]))
+            mock_context.deps.supabase_client.from_ = Mock(return_value=mock_table)
+
+            results = await search_knowledgebase(mock_context, "")
+            assert results == []
+
 
 class TestBM25Fallback:
     """Test cases for BM25 fallback search."""
@@ -211,3 +253,22 @@ class TestFormatResults:
             formatted[0].content
             == "<Start of Untitled document></Start of Untitled document>"
         )
+
+    def test_format_results_with_none_values(self):
+        """Test formatting with None values in fields."""
+        # _format_results should handle None by converting to "Untitled" and empty content
+        results = [{"title": None, "content": None}]
+        formatted = _format_results(results)
+
+        assert len(formatted) == 1
+        assert formatted[0].title == "Untitled"
+        assert "<Start of Untitled document>" in formatted[0].content
+
+    def test_format_results_with_special_characters(self):
+        """Test formatting with special characters in content."""
+        results = [{"title": "test&<>", "content": "content with & < > characters"}]
+        formatted = _format_results(results)
+
+        assert len(formatted) == 1
+        assert formatted[0].title == "test&<>"
+        assert "content with & < > characters" in formatted[0].content

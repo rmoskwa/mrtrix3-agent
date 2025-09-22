@@ -69,6 +69,89 @@ class TestMRtrixAssistant:
 
             assert result is not None
 
+    @pytest.mark.asyncio
+    async def test_agent_with_search_tool_call(self):
+        """Test agent triggering search tool with TestModel."""
+        # Mock the embedding service
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
+
+            # Mock successful search results
+            mock_supabase = MagicMock()
+            test_results = [
+                {
+                    "title": "MRtrix3 Overview",
+                    "content": "MRtrix3 is a software package...",
+                },
+                {"title": "Installation", "content": "Installing MRtrix3..."},
+            ]
+
+            mock_rpc_result = MagicMock()
+            mock_rpc_result.execute = AsyncMock(
+                return_value=MagicMock(data=test_results)
+            )
+            mock_supabase.rpc = MagicMock(return_value=mock_rpc_result)
+
+            mock_deps = SearchKnowledgebaseDependencies(
+                supabase_client=mock_supabase,
+                embedding_model="gemini-embedding-001",
+                rate_limiter=None,
+            )
+
+            assistant = MRtrixAssistant(dependencies=mock_deps)
+
+            # Use TestModel with custom output
+            test_model = TestModel(
+                custom_output_text="I found information about MRtrix3 in the documentation."
+            )
+
+            with assistant.agent.override(model=test_model):
+                result = await assistant.run("How do I install MRtrix3?")
+
+            assert result is not None
+            assert "MRtrix3" in str(result)
+
+    @pytest.mark.asyncio
+    async def test_agent_handles_empty_search_results(self):
+        """Test agent behavior when search returns no results."""
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
+
+            # Mock empty search results
+            mock_supabase = MagicMock()
+            mock_rpc_result = MagicMock()
+            mock_rpc_result.execute = AsyncMock(return_value=MagicMock(data=[]))
+            mock_supabase.rpc = MagicMock(return_value=mock_rpc_result)
+
+            # Mock BM25 fallback also returns empty
+            mock_table = MagicMock()
+            mock_table.select = MagicMock(return_value=mock_table)
+            mock_table.ilike = MagicMock(return_value=mock_table)
+            mock_table.limit = MagicMock(return_value=mock_table)
+            mock_table.execute = AsyncMock(return_value=MagicMock(data=[]))
+            mock_supabase.from_ = MagicMock(return_value=mock_table)
+
+            mock_deps = SearchKnowledgebaseDependencies(
+                supabase_client=mock_supabase,
+                embedding_model="gemini-embedding-001",
+                rate_limiter=None,
+            )
+
+            assistant = MRtrixAssistant(dependencies=mock_deps)
+
+            test_model = TestModel(
+                custom_output_text="I couldn't find any documentation on that topic."
+            )
+
+            with assistant.agent.override(model=test_model):
+                result = await assistant.run("Unknown topic xyz123")
+
+            assert result is not None
+            result_str = str(result).lower()
+            assert "couldn't find" in result_str or "no" in result_str
+
 
 class TestEnvironmentValidation:
     """Test environment validation function."""

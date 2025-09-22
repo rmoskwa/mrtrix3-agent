@@ -160,8 +160,8 @@ def _format_results(results: List[dict]) -> List[DocumentResult]:
     formatted = []
     for result in results:
         # Filter internal database fields from agent view
-        title = result.get("title", "Untitled")
-        content = result.get("content", "")
+        title = result.get("title", "Untitled") or "Untitled"
+        content = result.get("content", "") or ""
 
         # Format as XML block
         formatted_content = (

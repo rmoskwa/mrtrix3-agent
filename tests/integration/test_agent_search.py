@@ -177,3 +177,59 @@ class TestSearchIntegration:
 
             # Should still get results from BM25
             assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_with_special_characters(self, real_context):
+        """Test search handles special characters in queries."""
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
+
+            # Query with special characters that should be sanitized
+            results = await search_knowledgebase(
+                real_context, "test @#$%^&*() query with symbols"
+            )
+
+            # Should handle gracefully
+            assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_with_long_query(self, real_context):
+        """Test search handles very long queries."""
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
+
+            # Create a very long query (should be truncated to 500 chars)
+            long_query = "test " * 200  # 1000 characters
+
+            results = await search_knowledgebase(real_context, long_query)
+
+            # Should handle gracefully
+            assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_bm25_with_no_matches(self, real_context):
+        """Test BM25 with a query that has no matches."""
+        # Use a very specific non-existent term
+        results = await _bm25_fallback(real_context, "xyzabc123nonexistent")
+
+        assert isinstance(results, list)
+        assert len(results) == 0  # Should return empty list for no matches
+
+    @pytest.mark.asyncio
+    async def test_search_consistency_between_calls(self, real_context):
+        """Test that repeated searches return consistent results."""
+        with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
+            mock_embedding = mock_embedding_class.return_value
+            # Use same embedding for consistency
+            fixed_embedding = [0.2] * 768
+            mock_embedding.generate_embedding = AsyncMock(return_value=fixed_embedding)
+
+            # Make two identical searches
+            results1 = await search_knowledgebase(real_context, "mrconvert")
+            results2 = await search_knowledgebase(real_context, "mrconvert")
+
+            # Should get same results (at least same titles)
+            if results1 and results2:
+                assert results1[0].title == results2[0].title
