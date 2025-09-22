@@ -23,7 +23,7 @@ sys.modules["google.api_core.exceptions"] = MagicMock()
 from supabase import acreate_client, AsyncClient  # noqa: E402
 from pydantic_ai import RunContext  # noqa: E402
 from src.agent.models import SearchKnowledgebaseDependencies, DocumentResult  # noqa: E402
-from src.agent.tools import search_knowledgebase, _bm25_fallback  # noqa: E402
+from src.agent.tools import search_knowledgebase, _keyword_fallback_chromadb  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -149,20 +149,20 @@ class TestSearchIntegration:
                 assert "</Start of" in result.content
 
     @pytest.mark.asyncio
-    async def test_bm25_fallback_with_real_database(self, real_context):
-        """Test BM25 fallback with real database."""
-        # Test BM25 directly
-        results = await _bm25_fallback(real_context, "mrconvert")
+    async def test_keyword_fallback_with_real_database(self, real_context):
+        """Test keyword fallback with real database."""
+        # Test keyword search directly
+        results = await _keyword_fallback_chromadb(real_context, "mrconvert")
 
         assert isinstance(results, list)
-        # BM25 should also return formatted results
+        # Keyword search should also return formatted results
         for result in results[:2]:  # Check top 2
             assert isinstance(result, DocumentResult)
             assert "<Start of" in result.content
 
     @pytest.mark.asyncio
     async def test_search_fallback_on_rpc_error(self, real_context):
-        """Test that search falls back to BM25 when RPC fails."""
+        """Test that search falls back to keyword search when RPC fails."""
         with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
             mock_embedding = mock_embedding_class.return_value
             mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
@@ -172,10 +172,10 @@ class TestSearchIntegration:
                 side_effect=Exception("RPC error")
             )
 
-            # Should fall back to BM25
+            # Should fall back to keyword search
             results = await search_knowledgebase(real_context, "installation")
 
-            # Should still get results from BM25
+            # Should still get results from keyword search
             assert isinstance(results, list)
 
     @pytest.mark.asyncio
@@ -209,10 +209,10 @@ class TestSearchIntegration:
             assert isinstance(results, list)
 
     @pytest.mark.asyncio
-    async def test_bm25_with_no_matches(self, real_context):
-        """Test BM25 with a query that has no matches."""
+    async def test_keyword_search_with_no_matches(self, real_context):
+        """Test keyword search with a query that has no matches."""
         # Use a very specific non-existent term
-        results = await _bm25_fallback(real_context, "xyzabc123nonexistent")
+        results = await _keyword_fallback_chromadb(real_context, "xyzabc123nonexistent")
 
         assert isinstance(results, list)
         assert len(results) == 0  # Should return empty list for no matches

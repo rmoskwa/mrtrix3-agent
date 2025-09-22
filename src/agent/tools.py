@@ -1,17 +1,19 @@
 """
-MRtrix3 documentation search tool for PydanticAI agent.
+MRtrix3 documentation search tool for PydanticAI agent using ChromaDB.
 
 This module implements the search_knowledgebase tool that allows the AI agent
-to autonomously retrieve MRtrix3 documentation context when needed to answer questions.
+to autonomously retrieve MRtrix3 documentation context from the local ChromaDB
+database when needed to answer questions.
 """
 
 import logging
 import re
-from typing import List
+import json
+from typing import List, Optional, Dict, Any
+from pathlib import Path
 from pydantic_ai import RunContext, ModelRetry
 from .models import DocumentResult, SearchKnowledgebaseDependencies
 from .embedding_service import EmbeddingService
-from .circuit_breaker import supabase_circuit_breaker, CircuitBreakerError
 
 logger = logging.getLogger("agent.tools")
 
@@ -20,13 +22,13 @@ async def search_knowledgebase(
     ctx: RunContext[SearchKnowledgebaseDependencies], query: str
 ) -> List[DocumentResult]:
     """
-    Tool to search MRtrix3 documentation.
+    Tool to search MRtrix3 documentation in local ChromaDB.
 
     Call this when you needs additional context to answer questions
     about MRtrix3 commands, tutorials, guides, or references.
 
     Args:
-        ctx: PydanticAI context with dependencies including Supabase client,
+        ctx: PydanticAI context with dependencies including ChromaDB client,
              embedding service, and rate limiter
         query: Natural language search query from the agent
 
@@ -46,6 +48,13 @@ async def search_knowledgebase(
 
     logger.info(f"Agent searching for: {sanitized_query}")
 
+    # Get sync status for context
+    sync_status = _get_sync_status(ctx)
+    if sync_status:
+        logger.debug(
+            f"Database last synced: {sync_status.get('last_sync_time', 'unknown')}"
+        )
+
     # Generate embedding for the agent's search query
     try:
         # Use embedding service from dependencies if available, otherwise create new
@@ -59,48 +68,102 @@ async def search_knowledgebase(
         raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
     except Exception as e:
         logger.error(f"Permanent embedding error: {e}")
-        # Fall back to BM25 search
-        return await _bm25_fallback(ctx, sanitized_query)
+        # Fall back to keyword search
+        return await _keyword_fallback_chromadb(ctx, sanitized_query)
 
-    # Perform cosine similarity search using RPC function with circuit breaker
+    # Perform vector similarity search in ChromaDB
     try:
-
-        async def rpc_call():
-            return await ctx.deps.supabase_client.rpc(
-                "match_documents",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": getattr(
-                        ctx.deps.config, "similarity_threshold", 0.7
-                    )
-                    if hasattr(ctx.deps, "config")
-                    else 0.7,
-                    "match_count": getattr(ctx.deps.config, "max_search_results", 3)
-                    if hasattr(ctx.deps, "config")
-                    else 3,
-                },
-            ).execute()
-
-        results = await supabase_circuit_breaker.call(rpc_call)
-
-        if results.data and len(results.data) > 0:
-            return _format_results(results.data[:2])  # Return top-2 from top-3
-
-    except CircuitBreakerError as e:
-        logger.warning(f"Circuit breaker open for vector search: {e}")
-        # Fall back to BM25 search
+        results = await _search_chromadb_vector(ctx, embedding, sanitized_query)
+        if results:
+            return results
     except Exception as e:
-        logger.warning(f"Vector search failed, falling back to BM25: {e}")
+        logger.warning(f"Vector search failed, falling back to keyword search: {e}")
 
-    # Fall back to BM25 keyword search
-    return await _bm25_fallback(ctx, sanitized_query)
+    # Fall back to keyword search in ChromaDB
+    return await _keyword_fallback_chromadb(ctx, sanitized_query)
 
 
-async def _bm25_fallback(
+async def _search_chromadb_vector(
+    ctx: RunContext[SearchKnowledgebaseDependencies], embedding: List[float], query: str
+) -> List[DocumentResult]:
+    """
+    Perform vector similarity search in ChromaDB.
+
+    Args:
+        ctx: PydanticAI context with dependencies
+        embedding: Query embedding vector
+        query: Original query text for logging
+
+    Returns:
+        List of matching documents
+    """
+    try:
+        # Check if ChromaDB client and collection are available
+        if (
+            not hasattr(ctx.deps, "chromadb_collection")
+            or not ctx.deps.chromadb_collection
+        ):
+            logger.error("ChromaDB collection not available in dependencies")
+            return []
+
+        collection = ctx.deps.chromadb_collection
+
+        # Get configuration settings
+        max_results = 3
+        if hasattr(ctx.deps, "config") and ctx.deps.config:
+            max_results = getattr(ctx.deps.config, "max_search_results", 3)
+
+        # Query ChromaDB with embedding
+        # ChromaDB returns results sorted by distance (smaller = more similar)
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=max_results,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        if not results or not results.get("documents"):
+            logger.info(f"No vector search results for query: {query}")
+            return []
+
+        # Extract and format results
+        documents = results["documents"][0]  # First query's results
+        metadatas = (
+            results["metadatas"][0] if "metadatas" in results else [{}] * len(documents)
+        )
+        distances = (
+            results["distances"][0] if "distances" in results else [0] * len(documents)
+        )
+
+        # Filter by similarity threshold (ChromaDB uses distance, not similarity)
+        # Convert distance to similarity score (1 - distance for cosine)
+        threshold = 0.3  # Distance threshold (lower is better)
+        if hasattr(ctx.deps, "config") and ctx.deps.config:
+            similarity_threshold = getattr(ctx.deps.config, "similarity_threshold", 0.7)
+            threshold = 1 - similarity_threshold  # Convert similarity to distance
+
+        formatted_results = []
+        for doc, metadata, distance in zip(documents, metadatas, distances):
+            if distance <= threshold:
+                title = metadata.get("title", "Untitled") if metadata else "Untitled"
+                formatted_results.append(
+                    DocumentResult(
+                        title=title, content=_format_document_xml(title, doc)
+                    )
+                )
+
+        # Return top 2 results
+        return formatted_results[:2]
+
+    except Exception as e:
+        logger.error(f"ChromaDB vector search error: {e}")
+        raise
+
+
+async def _keyword_fallback_chromadb(
     ctx: RunContext[SearchKnowledgebaseDependencies], query: str
 ) -> List[DocumentResult]:
     """
-    BM25 fallback search using keywords column.
+    Keyword-based fallback search in ChromaDB.
 
     Args:
         ctx: PydanticAI context with dependencies
@@ -110,64 +173,114 @@ async def _bm25_fallback(
         List of matching documents
 
     Raises:
-        ModelRetry: For transient database errors
+        ModelRetry: For transient errors
     """
     try:
-        # Sanitize query for safe SQL LIKE pattern
-        # Escape SQL wildcard characters and limit length
-        safe_query = query.replace("%", "\\%").replace("_", "\\_").replace("[", "\\[")
-        safe_query = safe_query[:100]  # Limit pattern length for performance
+        # Check if ChromaDB collection is available
+        if (
+            not hasattr(ctx.deps, "chromadb_collection")
+            or not ctx.deps.chromadb_collection
+        ):
+            logger.error("ChromaDB collection not available for keyword search")
+            return []
 
-        async def bm25_query():
-            # Use parameterized query pattern with escaped wildcards
-            table = ctx.deps.supabase_client.from_("documents")
+        collection = ctx.deps.chromadb_collection
 
-            # Use safe pattern with escaped query
-            pattern = f"%{safe_query}%"
-            return (
-                await table.select("title, content")
-                .ilike("keywords", pattern)
-                .limit(3)
-                .execute()
+        # Extract keywords from query
+        keywords = query.lower().split()
+        if not keywords:
+            return []
+
+        # Search in the keywords metadata field
+        # ChromaDB supports $contains on string metadata fields
+        search_string = " ".join(keywords[:3])  # Limit to top 3 keywords
+
+        # Get all documents where keywords contain the search string
+        # Use get() instead of query() to avoid embedding generation
+        results = collection.get(
+            where={"keywords": {"$contains": search_string}},
+            limit=3,
+            include=["documents", "metadatas"],
+        )
+
+        # Reformat to match expected structure
+        if results and results.get("documents"):
+            results = {
+                "documents": [results["documents"]],
+                "metadatas": [results["metadatas"]] if "metadatas" in results else [[]],
+            }
+        else:
+            results = None
+
+        if not results or not results.get("documents"):
+            logger.info(f"No keyword search results for query: {query}")
+            return []
+
+        # Format results
+        documents = results["documents"][0]
+        metadatas = (
+            results["metadatas"][0] if "metadatas" in results else [{}] * len(documents)
+        )
+
+        formatted_results = []
+        for doc, metadata in zip(documents, metadatas):
+            title = metadata.get("title", "Untitled") if metadata else "Untitled"
+            formatted_results.append(
+                DocumentResult(title=title, content=_format_document_xml(title, doc))
             )
 
-        results = await supabase_circuit_breaker.call(bm25_query)
+        # Return top 2 results
+        return formatted_results[:2]
 
-        if results.data:
-            return _format_results(results.data[:2])  # Return top-2
-
-        logger.info(f"No results found for query: {query}")
-        return []
-
-    except CircuitBreakerError as e:
-        logger.error(f"Circuit breaker open for BM25 search: {e}")
-        raise ModelRetry(f"Database temporarily unavailable: {e}") from e
     except Exception as e:
-        logger.error(f"BM25 search failed: {e}")
+        logger.error(f"ChromaDB keyword search failed: {e}")
         raise ModelRetry(f"Search temporarily unavailable: {e}") from e
 
 
-def _format_results(results: List[dict]) -> List[DocumentResult]:
+def _format_document_xml(title: str, content: str) -> str:
     """
-    Format search results into DocumentResult models with XML blocks.
+    Format document content as XML block.
 
     Args:
-        results: Raw database results
+        title: Document title
+        content: Document content
 
     Returns:
-        List of formatted DocumentResult objects
+        Formatted content with XML tags
     """
-    formatted = []
-    for result in results:
-        # Filter internal database fields from agent view
-        title = result.get("title", "Untitled") or "Untitled"
-        content = result.get("content", "") or ""
+    # Ensure we have valid strings
+    title = title or "Untitled"
+    content = content or ""
 
-        # Format as XML block
-        formatted_content = (
-            f"<Start of {title} document>{content}</Start of {title} document>"
-        )
+    # Format as XML block
+    return f"<Start of {title} document>{content}</Start of {title} document>"
 
-        formatted.append(DocumentResult(title=title, content=formatted_content))
 
-    return formatted
+def _get_sync_status(
+    ctx: RunContext[SearchKnowledgebaseDependencies],
+) -> Optional[Dict[str, Any]]:
+    """
+    Get sync status information from metadata.
+
+    Args:
+        ctx: PydanticAI context with dependencies
+
+    Returns:
+        Dictionary with sync status information or None
+    """
+    try:
+        # Get ChromaDB path from dependencies
+        if hasattr(ctx.deps, "chromadb_path") and ctx.deps.chromadb_path:
+            metadata_file = Path(ctx.deps.chromadb_path) / "sync_metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+                    return {
+                        "last_sync_time": metadata.get("last_sync_time"),
+                        "document_count": metadata.get("document_count"),
+                        "version": metadata.get("version", "unknown"),
+                    }
+    except Exception as e:
+        logger.debug(f"Could not read sync status: {e}")
+
+    return None

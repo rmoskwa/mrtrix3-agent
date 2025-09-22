@@ -299,6 +299,8 @@ class DatabaseSyncManager:
                 "title": doc.get("title", ""),
                 "keywords": doc.get("keywords", ""),
                 "version": doc.get("version", "latest"),
+                "source_url": doc.get("source_url", ""),
+                "synopsis": doc.get("synopsis", ""),
             }
 
             # Add optional fields if present
