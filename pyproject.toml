@@ -33,7 +33,12 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["src.agent", "src.knowledge_base", "monitoring"]
+packages = ["agent", "knowledge_base", "monitoring"]
+
+[tool.setuptools.package-dir]
+"agent" = "src/agent"
+"knowledge_base" = "src/knowledge_base"
+"monitoring" = "monitoring"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
