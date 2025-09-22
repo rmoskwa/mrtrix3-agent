@@ -1,4 +1,4 @@
-"""Integration tests for agent search functionality with real Supabase."""
+"""Integration tests for agent search functionality with ChromaDB and Supabase sync."""
 
 import os
 import sys
@@ -20,15 +20,16 @@ sys.modules["google.api_core"] = MagicMock()
 sys.modules["google.api_core.retry"] = MagicMock()
 sys.modules["google.api_core.exceptions"] = MagicMock()
 
+import chromadb  # noqa: E402
 from supabase import acreate_client, AsyncClient  # noqa: E402
 from pydantic_ai import RunContext  # noqa: E402
 from src.agent.models import SearchKnowledgebaseDependencies, DocumentResult  # noqa: E402
-from src.agent.tools import search_knowledgebase, _keyword_fallback_chromadb  # noqa: E402
+from src.agent.tools import search_knowledgebase  # noqa: E402
 
 
 @pytest_asyncio.fixture
 async def supabase_client() -> AsyncClient:
-    """Create real async Supabase client for integration tests."""
+    """Create real async Supabase client for sync operations."""
     # Only load .env if not in CI environment
     if not os.getenv("CI"):
         from dotenv import load_dotenv
@@ -45,11 +46,72 @@ async def supabase_client() -> AsyncClient:
 
 
 @pytest.fixture
-def real_dependencies(supabase_client):
-    """Create real dependencies with actual Supabase client."""
+def chromadb_test_client(tmp_path):
+    """Create a test ChromaDB client with temporary storage."""
+    client = chromadb.PersistentClient(
+        path=str(tmp_path / "chromadb_test"),
+        settings=chromadb.Settings(anonymized_telemetry=False),
+    )
+    return client
+
+
+@pytest.fixture
+def chromadb_test_collection(chromadb_test_client):
+    """Create a test ChromaDB collection with sample data."""
+    collection = chromadb_test_client.get_or_create_collection(
+        name="mrtrix3_documents",
+        metadata={
+            "description": "MRtrix3 documentation for testing",
+            "embedding_dimensions": "768",
+        },
+    )
+
+    # Add test documents
+    test_docs = [
+        {
+            "id": "test1",
+            "document": "Perform conversion between image formats using mrconvert",
+            "metadata": {
+                "title": "mrconvert",
+                "keywords": "convert image format",
+                "doc_type": "command",
+            },
+            "embedding": [0.1] * 768,  # Dummy embedding
+        },
+        {
+            "id": "test2",
+            "document": "How to install MRtrix3 on different systems",
+            "metadata": {
+                "title": "Installation Guide",
+                "keywords": "install setup",
+                "doc_type": "guide",
+            },
+            "embedding": [0.2] * 768,  # Dummy embedding
+        },
+    ]
+
+    for doc in test_docs:
+        collection.add(
+            ids=[doc["id"]],
+            documents=[doc["document"]],
+            metadatas=[doc["metadata"]],
+            embeddings=[doc["embedding"]],
+        )
+
+    return collection
+
+
+@pytest.fixture
+def real_dependencies(
+    supabase_client, chromadb_test_client, chromadb_test_collection, tmp_path
+):
+    """Create real dependencies with both Supabase and ChromaDB."""
     deps = SearchKnowledgebaseDependencies(
         supabase_client=supabase_client,
-        embedding_model=os.getenv("EMBEDDING_MODEL"),
+        chromadb_client=chromadb_test_client,
+        chromadb_collection=chromadb_test_collection,
+        chromadb_path=str(tmp_path / "chromadb_test"),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001"),
         rate_limiter=None,
     )
     return deps
@@ -61,6 +123,35 @@ def real_context(real_dependencies):
     ctx = MagicMock(spec=RunContext)
     ctx.deps = real_dependencies
     return ctx
+
+
+class TestChromaDBIntegration:
+    """Test ChromaDB integration for agent search."""
+
+    def test_chromadb_collection_exists(self, chromadb_test_collection):
+        """Test that ChromaDB collection is properly created."""
+        assert chromadb_test_collection is not None
+        assert chromadb_test_collection.count() > 0
+
+    def test_chromadb_query_works(self, chromadb_test_collection):
+        """Test basic ChromaDB query functionality."""
+        # Test query with dummy embedding
+        results = chromadb_test_collection.query(
+            query_embeddings=[[0.1] * 768], n_results=2
+        )
+
+        assert results is not None
+        assert "documents" in results
+        assert len(results["documents"][0]) > 0
+
+    def test_chromadb_metadata_filter(self, chromadb_test_collection):
+        """Test ChromaDB get functionality without filtering."""
+        # Test basic get without filters (ChromaDB doesn't support $contains)
+        results = chromadb_test_collection.get(limit=2)
+
+        assert results is not None
+        assert "documents" in results
+        assert len(results["documents"]) > 0
 
 
 class TestRPCFunction:
@@ -125,11 +216,11 @@ class TestRPCFunction:
 
 
 class TestSearchIntegration:
-    """Integration tests for search_knowledgebase with real database."""
+    """Integration tests for search_knowledgebase with ChromaDB."""
 
     @pytest.mark.asyncio
-    async def test_search_with_real_rpc(self, real_context):
-        """Test search_knowledgebase with real RPC function (mocked embedding)."""
+    async def test_search_with_chromadb(self, real_context):
+        """Test search_knowledgebase with ChromaDB (mocked embedding)."""
         # Mock only the embedding generation
         with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
             mock_embedding = mock_embedding_class.return_value
@@ -137,7 +228,7 @@ class TestSearchIntegration:
                 return_value=[0.1] * 768  # Dummy embedding
             )
 
-            # This will use the real RPC function
+            # This will use ChromaDB
             results = await search_knowledgebase(real_context, "test query")
 
             # Results should be formatted DocumentResult objects
@@ -149,34 +240,26 @@ class TestSearchIntegration:
                 assert "</Start of" in result.content
 
     @pytest.mark.asyncio
-    async def test_keyword_fallback_with_real_database(self, real_context):
-        """Test keyword fallback with real database."""
-        # Test keyword search directly
-        results = await _keyword_fallback_chromadb(real_context, "mrconvert")
-
-        assert isinstance(results, list)
-        # Keyword search should also return formatted results
-        for result in results[:2]:  # Check top 2
-            assert isinstance(result, DocumentResult)
-            assert "<Start of" in result.content
-
-    @pytest.mark.asyncio
-    async def test_search_fallback_on_rpc_error(self, real_context):
-        """Test that search falls back to keyword search when RPC fails."""
+    async def test_search_returns_empty_on_vector_error(self, real_context):
+        """Test that search returns empty list when vector search fails."""
         with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
             mock_embedding = mock_embedding_class.return_value
             mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
 
-            # Mock RPC to fail
-            real_context.deps.supabase_client.rpc = MagicMock(
-                side_effect=Exception("RPC error")
+            # Mock ChromaDB query to fail
+            original_query = real_context.deps.chromadb_collection.query
+            real_context.deps.chromadb_collection.query = MagicMock(
+                side_effect=Exception("Vector search error")
             )
 
-            # Should fall back to keyword search
-            results = await search_knowledgebase(real_context, "installation")
+            # Should return empty list when vector search fails
+            results = await search_knowledgebase(real_context, "install")
 
-            # Should still get results from keyword search
-            assert isinstance(results, list)
+            # Restore original method
+            real_context.deps.chromadb_collection.query = original_query
+
+            # Should return empty list, not error
+            assert results == []
 
     @pytest.mark.asyncio
     async def test_search_with_special_characters(self, real_context):
@@ -207,15 +290,6 @@ class TestSearchIntegration:
 
             # Should handle gracefully
             assert isinstance(results, list)
-
-    @pytest.mark.asyncio
-    async def test_keyword_search_with_no_matches(self, real_context):
-        """Test keyword search with a query that has no matches."""
-        # Use a very specific non-existent term
-        results = await _keyword_fallback_chromadb(real_context, "xyzabc123nonexistent")
-
-        assert isinstance(results, list)
-        assert len(results) == 0  # Should return empty list for no matches
 
     @pytest.mark.asyncio
     async def test_search_consistency_between_calls(self, real_context):

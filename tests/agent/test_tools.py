@@ -15,7 +15,6 @@ sys.modules["google.api_core.exceptions"] = MagicMock()
 from src.agent.models import SearchKnowledgebaseDependencies, DocumentResult  # noqa: E402
 from src.agent.tools import (  # noqa: E402
     search_knowledgebase,
-    _keyword_fallback_chromadb,
     _format_document_xml,
 )
 
@@ -122,8 +121,8 @@ class TestSearchKnowledgebase:
             assert "temporarily failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_keyword_fallback_activation(self, mock_context):
-        """Test keyword fallback when vector search fails."""
+    async def test_vector_search_failure_returns_empty(self, mock_context):
+        """Test that vector search failure returns empty results."""
         with patch("src.agent.tools.EmbeddingService") as mock_embedding_class:
             mock_embedding = mock_embedding_class.return_value
             mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
@@ -133,20 +132,11 @@ class TestSearchKnowledgebase:
                 side_effect=Exception("Vector search error")
             )
 
-            # Mock keyword search with get()
-            mock_context.deps.chromadb_collection.get = Mock(
-                return_value={
-                    "documents": ["Perform conversion between image formats"],
-                    "metadatas": [{"title": "mrconvert", "keywords": "convert"}],
-                }
-            )
-
             # Execute search
             results = await search_knowledgebase(mock_context, "convert images")
 
-            # Verify keyword search was called
-            mock_context.deps.chromadb_collection.get.assert_called_once()
-            assert len(results) > 0
+            # Should return empty results when vector search fails
+            assert results == []
 
     @pytest.mark.asyncio
     async def test_no_results_found(self, mock_context):
@@ -158,11 +148,6 @@ class TestSearchKnowledgebase:
             # Mock empty results from ChromaDB
             mock_context.deps.chromadb_collection.query = Mock(
                 return_value={"documents": [[]], "metadatas": [[]], "distances": [[]]}
-            )
-
-            # Mock empty keyword search results too
-            mock_context.deps.chromadb_collection.get = Mock(
-                return_value={"documents": [], "metadatas": []}
             )
 
             results = await search_knowledgebase(mock_context, "nonexistent topic")
@@ -215,50 +200,6 @@ class TestSearchKnowledgebase:
             assert results == []
 
 
-class TestKeywordFallback:
-    """Test cases for keyword fallback search."""
-
-    @pytest.mark.asyncio
-    async def test_keyword_successful_search(self, mock_context):
-        """Test successful keyword search."""
-        # Mock ChromaDB get() for keyword search
-        mock_context.deps.chromadb_collection.get = Mock(
-            return_value={
-                "documents": ["Installation instructions", "Convert images"],
-                "metadatas": [
-                    {"title": "Installation Guide", "keywords": "install setup"},
-                    {"title": "mrconvert", "keywords": "convert image"},
-                ],
-            }
-        )
-
-        results = await _keyword_fallback_chromadb(mock_context, "installation guide")
-
-        assert len(results) == 2
-        assert isinstance(results[0], DocumentResult)
-        assert results[0].title == "Installation Guide"
-
-    @pytest.mark.asyncio
-    async def test_keyword_database_error(self, mock_context):
-        """Test keyword search raises ModelRetry on database error."""
-        mock_context.deps.chromadb_collection.get = Mock(
-            side_effect=Exception("Database connection error")
-        )
-
-        with pytest.raises(ModelRetry) as exc_info:
-            await _keyword_fallback_chromadb(mock_context, "test query")
-
-        assert "temporarily unavailable" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_keyword_no_collection(self, mock_context):
-        """Test keyword search when collection is not available."""
-        mock_context.deps.chromadb_collection = None
-
-        results = await _keyword_fallback_chromadb(mock_context, "test")
-        assert results == []
-
-
 class TestFormatDocumentXML:
     """Test cases for document XML formatting."""
 
@@ -302,11 +243,6 @@ class TestSearchWithSpecialCases:
                 return_value={"documents": [[]], "metadatas": [[]], "distances": [[]]}
             )
 
-            # Mock keyword fallback too
-            mock_context.deps.chromadb_collection.get = Mock(
-                return_value={"documents": [], "metadatas": []}
-            )
-
             # Query with special characters
             await search_knowledgebase(
                 mock_context, "test @#$%^&*() query with <script>alert('xss')</script>"
@@ -326,11 +262,6 @@ class TestSearchWithSpecialCases:
 
             mock_context.deps.chromadb_collection.query = Mock(
                 return_value={"documents": [[]], "metadatas": [[]], "distances": [[]]}
-            )
-
-            # Mock keyword fallback too
-            mock_context.deps.chromadb_collection.get = Mock(
-                return_value={"documents": [], "metadatas": []}
             )
 
             # Create a very long query (over 500 chars)

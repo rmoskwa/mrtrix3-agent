@@ -68,19 +68,15 @@ async def search_knowledgebase(
         raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
     except Exception as e:
         logger.error(f"Permanent embedding error: {e}")
-        # Fall back to keyword search
-        return await _keyword_fallback_chromadb(ctx, sanitized_query)
+        return []
 
     # Perform vector similarity search in ChromaDB
     try:
         results = await _search_chromadb_vector(ctx, embedding, sanitized_query)
-        if results:
-            return results
+        return results if results else []
     except Exception as e:
-        logger.warning(f"Vector search failed, falling back to keyword search: {e}")
-
-    # Fall back to keyword search in ChromaDB
-    return await _keyword_fallback_chromadb(ctx, sanitized_query)
+        logger.error(f"Vector search failed: {e}")
+        return []
 
 
 async def _search_chromadb_vector(
@@ -157,84 +153,6 @@ async def _search_chromadb_vector(
     except Exception as e:
         logger.error(f"ChromaDB vector search error: {e}")
         raise
-
-
-async def _keyword_fallback_chromadb(
-    ctx: RunContext[SearchKnowledgebaseDependencies], query: str
-) -> List[DocumentResult]:
-    """
-    Keyword-based fallback search in ChromaDB.
-
-    Args:
-        ctx: PydanticAI context with dependencies
-        query: Natural language search query
-
-    Returns:
-        List of matching documents
-
-    Raises:
-        ModelRetry: For transient errors
-    """
-    try:
-        # Check if ChromaDB collection is available
-        if (
-            not hasattr(ctx.deps, "chromadb_collection")
-            or not ctx.deps.chromadb_collection
-        ):
-            logger.error("ChromaDB collection not available for keyword search")
-            return []
-
-        collection = ctx.deps.chromadb_collection
-
-        # Extract keywords from query
-        keywords = query.lower().split()
-        if not keywords:
-            return []
-
-        # Search in the keywords metadata field
-        # ChromaDB supports $contains on string metadata fields
-        search_string = " ".join(keywords[:3])  # Limit to top 3 keywords
-
-        # Get all documents where keywords contain the search string
-        # Use get() instead of query() to avoid embedding generation
-        results = collection.get(
-            where={"keywords": {"$contains": search_string}},
-            limit=3,
-            include=["documents", "metadatas"],
-        )
-
-        # Reformat to match expected structure
-        if results and results.get("documents"):
-            results = {
-                "documents": [results["documents"]],
-                "metadatas": [results["metadatas"]] if "metadatas" in results else [[]],
-            }
-        else:
-            results = None
-
-        if not results or not results.get("documents"):
-            logger.info(f"No keyword search results for query: {query}")
-            return []
-
-        # Format results
-        documents = results["documents"][0]
-        metadatas = (
-            results["metadatas"][0] if "metadatas" in results else [{}] * len(documents)
-        )
-
-        formatted_results = []
-        for doc, metadata in zip(documents, metadatas):
-            title = metadata.get("title", "Untitled") if metadata else "Untitled"
-            formatted_results.append(
-                DocumentResult(title=title, content=_format_document_xml(title, doc))
-            )
-
-        # Return top 2 results
-        return formatted_results[:2]
-
-    except Exception as e:
-        logger.error(f"ChromaDB keyword search failed: {e}")
-        raise ModelRetry(f"Search temporarily unavailable: {e}") from e
 
 
 def _format_document_xml(title: str, content: str) -> str:
