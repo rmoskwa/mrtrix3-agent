@@ -32,9 +32,8 @@ dev = [
     "pytest-cov>=4.1.0",  # For coverage reports
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["src*", "knowledge_base*", "agent*", "monitoring*"]
+[tool.setuptools]
+packages = ["src.agent", "src.knowledge_base", "monitoring"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
