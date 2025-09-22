@@ -161,7 +161,7 @@ class TestEnvironmentValidation:
         env_vars = {
             "SUPABASE_URL": "https://test.supabase.co",
             "SUPABASE_KEY": "test_key",
-            "GEMINI_API_KEY": "gemini_key",
+            "GOOGLE_API_KEY": "google_key",
             "GOOGLE_API_KEY_EMBEDDING": "google_key",
             "EMBEDDING_MODEL": "gemini-embedding-001",
             "EMBEDDING_DIMENSIONS": "768",
@@ -172,7 +172,7 @@ class TestEnvironmentValidation:
 
         assert result["SUPABASE_URL"] == "https://test.supabase.co"
         assert result["SUPABASE_KEY"] == "test_key"
-        assert result["GEMINI_API_KEY"] == "gemini_key"
+        assert result["GOOGLE_API_KEY"] == "google_key"
         assert result["GOOGLE_API_KEY_EMBEDDING"] == "google_key"
         assert result["EMBEDDING_MODEL"] == "gemini-embedding-001"
         assert result["EMBEDDING_DIMENSIONS"] == 768
@@ -181,7 +181,7 @@ class TestEnvironmentValidation:
         """Test validation fails when required variables are missing."""
         env_vars = {
             "SUPABASE_URL": "https://test.supabase.co",
-            "GEMINI_API_KEY": "gemini_key",
+            "GOOGLE_API_KEY": "google_key",
             "GOOGLE_API_KEY_EMBEDDING": "google_key",
             "EMBEDDING_MODEL": "gemini-embedding-001",
             "EMBEDDING_DIMENSIONS": "768",
@@ -197,7 +197,7 @@ class TestEnvironmentValidation:
         env_vars = {
             "SUPABASE_URL": "https://test.supabase.co",
             "SUPABASE_KEY": "test_key",
-            "GEMINI_API_KEY": "gemini_key",
+            "GOOGLE_API_KEY": "google_key",
             "GOOGLE_API_KEY_EMBEDDING": "google_key",
             "EMBEDDING_MODEL": "wrong-model",
             "EMBEDDING_DIMENSIONS": "768",
@@ -212,7 +212,7 @@ class TestEnvironmentValidation:
         env_vars = {
             "SUPABASE_URL": "https://test.supabase.co",
             "SUPABASE_KEY": "test_key",
-            "GEMINI_API_KEY": "gemini_key",
+            "GOOGLE_API_KEY": "google_key",
             "GOOGLE_API_KEY_EMBEDDING": "google_key",
             "EMBEDDING_MODEL": "gemini-embedding-001",
             "EMBEDDING_DIMENSIONS": "512",

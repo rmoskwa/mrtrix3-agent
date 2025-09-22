@@ -13,25 +13,53 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import google.generativeai as genai
 from dotenv import load_dotenv
-from rich.console import Console
-from rich.markdown import Markdown
 
-from src.agent.agent import MRtrixAssistant
-from src.agent.async_dependencies import create_async_dependencies
-from src.agent.error_messages import get_user_friendly_message, log_and_get_message
-from src.agent.sync_manager import DatabaseSyncManager
-from src.agent.dependencies import validate_environment
-from src.agent.local_storage_manager import LocalDatabaseManager
-
-# Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path, override=True)
+
+# Now safe to import other modules that may use environment variables
+import google.generativeai as genai  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.markdown import Markdown  # noqa: E402
+
+from src.agent.agent import MRtrixAssistant  # noqa: E402
+from src.agent.async_dependencies import create_async_dependencies  # noqa: E402
+from src.agent.error_messages import get_user_friendly_message, log_and_get_message  # noqa: E402
+from src.agent.sync_manager import DatabaseSyncManager  # noqa: E402
+from src.agent.dependencies import validate_environment  # noqa: E402
+from src.agent.local_storage_manager import LocalDatabaseManager  # noqa: E402
+
+# Import monitoring functions - the dynamic check will handle env vars properly
+from src.agent.monitoring_integration import (  # noqa: E402
+    is_monitoring_enabled,
+    get_dual_logger,
+    log_dual,
+    set_monitoring_request_id,
+    clear_monitoring_request_id,
+    _initialize_monitoring,
+)
 
 # Set up logging - only show warnings and above by default
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 logger = logging.getLogger("agent.cli")
+
+# Initialize monitoring if enabled
+if is_monitoring_enabled():
+    # Try to initialize monitoring
+    if _initialize_monitoring():
+        from monitoring.logging_config import configure_structured_logging
+
+        configure_structured_logging()
+        # Get dual loggers for CLI
+        user_logger, monitoring_logger = get_dual_logger("agent.cli")
+        print("Monitoring system initialized")
+    else:
+        user_logger = logger
+        monitoring_logger = None
+else:
+    user_logger = logger
+    monitoring_logger = None
 
 # Suppress verbose HTTP and AI service logging
 logging.getLogger("httpcore").setLevel(logging.ERROR)
@@ -221,10 +249,41 @@ async def start_conversation():
                         f"[dim]Tokens used: {token_manager.total_tokens}/{TokenManager.MAX_TOKENS}[/dim]"
                     )
 
+                # Set request ID for monitoring correlation
+                request_id = set_monitoring_request_id()
+
+                # Log query start with monitoring
+                if monitoring_logger:
+                    log_dual(
+                        user_logger,
+                        monitoring_logger,
+                        "info",
+                        "",  # No user message needed
+                        f"Processing query: {user_input[:100]}...",
+                        request_id=request_id,
+                        tokens_used=token_manager.total_tokens,
+                    )
+
                 result = await agent.run(user_input)
                 response_text = result.output
 
                 await token_manager.add_message(response_text)
+
+                # Log completion with monitoring
+                if monitoring_logger:
+                    log_dual(
+                        user_logger,
+                        monitoring_logger,
+                        "info",
+                        "",  # No user message needed
+                        "Query processed successfully",
+                        request_id=request_id,
+                        response_length=len(response_text),
+                        total_tokens=token_manager.total_tokens,
+                    )
+
+                # Clear request ID after processing
+                clear_monitoring_request_id()
 
                 console.print("\n[bold cyan]Assistant:[/bold cyan]")
                 console.print(Markdown(response_text))

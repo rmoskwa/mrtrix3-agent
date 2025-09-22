@@ -14,10 +14,17 @@ from pathlib import Path
 from pydantic_ai import RunContext, ModelRetry
 from .models import DocumentResult, SearchKnowledgebaseDependencies
 from .embedding_service import EmbeddingService
+from .monitoring_integration import (
+    track_tool_invocation,
+    get_dual_logger,
+)
 
 logger = logging.getLogger("agent.tools")
+# Get dual loggers for monitoring
+user_logger, monitoring_logger = get_dual_logger("agent.tools")
 
 
+@track_tool_invocation("search_knowledgebase")
 async def search_knowledgebase(
     ctx: RunContext[SearchKnowledgebaseDependencies], query: str
 ) -> List[DocumentResult]:

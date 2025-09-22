@@ -27,7 +27,7 @@ def validate_environment() -> dict:
     required_vars = [
         "SUPABASE_URL",
         "SUPABASE_KEY",
-        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
         "GOOGLE_API_KEY_EMBEDDING",
     ]
 

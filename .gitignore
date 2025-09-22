@@ -20,3 +20,5 @@ __pycache__/
 # Development files
 docsInternal/
 CLAUDE.md
+benchmark_results/
+metrics/
