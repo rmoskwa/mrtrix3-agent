@@ -65,8 +65,10 @@ def setup_chromadb_client(storage_path: str):
     path = Path(storage_path)
     path.mkdir(parents=True, exist_ok=True)
 
-    # Create persistent client
-    client = chromadb.PersistentClient(path=str(path))
+    # Create persistent client with telemetry disabled
+    client = chromadb.PersistentClient(
+        path=str(path), settings=chromadb.Settings(anonymized_telemetry=False)
+    )
     return client
 
 

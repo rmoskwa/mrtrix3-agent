@@ -373,7 +373,9 @@ class DatabaseSyncManager:
         try:
             # Create temporary ChromaDB instance
             temp_path = tempfile.mkdtemp(prefix="chromadb_sync_")
-            temp_client = chromadb.PersistentClient(path=temp_path)
+            temp_client = chromadb.PersistentClient(
+                path=temp_path, settings=chromadb.Settings(anonymized_telemetry=False)
+            )
 
             # Populate temporary database
             self.console.print("📥 Downloading and processing documents...")

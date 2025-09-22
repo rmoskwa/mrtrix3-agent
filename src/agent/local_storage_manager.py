@@ -182,7 +182,10 @@ class LocalDatabaseManager:
     def _create_client(self) -> ClientAPI:
         """Create ChromaDB client."""
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        return chromadb.PersistentClient(path=str(self.storage_path))
+        return chromadb.PersistentClient(
+            path=str(self.storage_path),
+            settings=chromadb.Settings(anonymized_telemetry=False),
+        )
 
     def initialize_collection(self, force_migration: bool = False) -> Collection:
         """Initialize or migrate ChromaDB collection.

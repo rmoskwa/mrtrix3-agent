@@ -74,8 +74,10 @@ def setup_chromadb_client(storage_path: str) -> ClientAPI:
     path = Path(storage_path)
     path.mkdir(parents=True, exist_ok=True)
 
-    # Create persistent client
-    client = chromadb.PersistentClient(path=str(path))
+    # Create persistent client with telemetry disabled
+    client = chromadb.PersistentClient(
+        path=str(path), settings=chromadb.Settings(anonymized_telemetry=False)
+    )
 
     return client
 
@@ -174,7 +176,10 @@ def check_chromadb_initialized(storage_path: Optional[str] = None) -> bool:
         storage_path = env_vars["CHROMADB_PATH"]
 
     try:
-        client = chromadb.PersistentClient(path=str(storage_path))
+        client = chromadb.PersistentClient(
+            path=str(storage_path),
+            settings=chromadb.Settings(anonymized_telemetry=False),
+        )
         collection = client.get_collection("mrtrix3_documents")
         # Check if collection has any documents
         count = collection.count()
