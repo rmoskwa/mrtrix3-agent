@@ -14,8 +14,8 @@ class MRtrixAssistant:
         Initialize MRtrix3 Assistant agent.
 
         Args:
-            dependencies: Dependency injection container with Supabase client,
-                         embedding model, and rate limiter.
+            dependencies: Dependency injection container with ChromaDB client for local queries,
+                         Supabase client for sync operations, embedding model, and rate limiter.
         """
         self.dependencies = dependencies
 

@@ -7,9 +7,13 @@ from pydantic import BaseModel, Field, field_validator
 # Use TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
     from supabase import AsyncClient
+    from chromadb.api import ClientAPI
+    from chromadb import Collection
     from .embedding_service import EmbeddingService
 else:
     AsyncClient = Any
+    ClientAPI = Any
+    Collection = Any
     EmbeddingService = Any
 
 
@@ -43,10 +47,19 @@ class BaseDependencies(BaseModel):
 
 
 class SearchKnowledgebaseDependencies(BaseDependencies):
-    """Dependencies specifically for the search_knowledgebase tool."""
+    """Dependencies specifically for the search_knowledgebase tool with dual database support."""
 
     supabase_client: AsyncClient = Field(
-        ..., description="Initialized async Supabase client"
+        ..., description="Initialized async Supabase client for sync operations"
+    )
+    chromadb_client: Optional[ClientAPI] = Field(
+        default=None, description="ChromaDB client for local operations"
+    )
+    chromadb_collection: Optional[Collection] = Field(
+        default=None, description="ChromaDB collection for document storage"
+    )
+    chromadb_path: Optional[str] = Field(
+        default=None, description="Path to ChromaDB storage directory"
     )
     embedding_model: str = Field(
         default_factory=lambda: os.getenv("EMBEDDING_MODEL"),
