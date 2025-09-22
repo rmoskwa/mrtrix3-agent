@@ -22,7 +22,8 @@ from src.agent.agent import MRtrixAssistant
 from src.agent.async_dependencies import create_async_dependencies
 from src.agent.error_messages import get_user_friendly_message, log_and_get_message
 from src.agent.sync_manager import DatabaseSyncManager
-from src.agent.dependencies import validate_environment, setup_chromadb_client
+from src.agent.dependencies import validate_environment
+from src.agent.local_storage_manager import LocalDatabaseManager
 
 # Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -124,9 +125,34 @@ async def start_conversation():
     console.print("Initializing local database...\n")
 
     # Run sync check before creating dependencies
+    local_manager = None
     try:
         env_vars = validate_environment()
-        chromadb_client = setup_chromadb_client(env_vars["CHROMADB_PATH"])
+
+        # Initialize local database manager with health check
+        local_manager = LocalDatabaseManager(env_vars["CHROMADB_PATH"])
+
+        # Acquire lock for exclusive access
+        if not local_manager.lock_manager.acquire_lock():
+            console.print("[yellow]Warning: Another instance may be running[/yellow]")
+            console.print("Continuing anyway...\n")
+
+        # Perform health check
+        is_healthy, issues = local_manager.health_check()
+        if not is_healthy:
+            console.print(f"[yellow]Database health issues detected: {issues}[/yellow]")
+            if local_manager.recover_database():
+                console.print("[green]Database recovered successfully[/green]")
+            else:
+                console.print("[yellow]Continuing with potential issues...[/yellow]")
+
+        # Initialize collection with schema migration if needed
+        collection = local_manager.initialize_collection()
+
+        # Clean up old temp files
+        cleaned = local_manager.cleanup_temp_files(older_than_hours=24)
+        if cleaned > 0:
+            console.print(f"[dim]Cleaned up {cleaned} temporary files[/dim]")
 
         # Create sync manager and check for updates
         from supabase import create_client
@@ -137,7 +163,7 @@ async def start_conversation():
 
         sync_manager = DatabaseSyncManager(
             supabase_client=supabase_client,
-            chromadb_client=chromadb_client,
+            chromadb_client=local_manager.client,
             chromadb_path=env_vars["CHROMADB_PATH"],
         )
 
@@ -145,8 +171,12 @@ async def start_conversation():
         sync_manager.sync_on_startup()
 
     except Exception as e:
-        console.print(f"[yellow]Warning: Sync check failed: {e}[/yellow]")
+        console.print(f"[yellow]Warning: Database initialization issue: {e}[/yellow]")
         console.print("Continuing with local database...\n")
+    finally:
+        # Release lock when done
+        if local_manager:
+            local_manager.lock_manager.release_lock()
 
     console.print("Ask me anything about MRtrix3! Type '/exit' or Ctrl+C to quit.\n")
 
