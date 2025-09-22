@@ -21,6 +21,8 @@ from rich.markdown import Markdown
 from src.agent.agent import MRtrixAssistant
 from src.agent.async_dependencies import create_async_dependencies
 from src.agent.error_messages import get_user_friendly_message, log_and_get_message
+from src.agent.sync_manager import DatabaseSyncManager
+from src.agent.dependencies import validate_environment, setup_chromadb_client
 
 # Load .env file from project root
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -119,6 +121,33 @@ async def start_conversation():
         logging.getLogger().setLevel(logging.DEBUG)
 
     console.print("[bold blue]MRtrix3 Assistant[/bold blue]")
+    console.print("Initializing local database...\n")
+
+    # Run sync check before creating dependencies
+    try:
+        env_vars = validate_environment()
+        chromadb_client = setup_chromadb_client(env_vars["CHROMADB_PATH"])
+
+        # Create sync manager and check for updates
+        from supabase import create_client
+
+        supabase_client = create_client(
+            env_vars["SUPABASE_URL"], env_vars["SUPABASE_KEY"]
+        )
+
+        sync_manager = DatabaseSyncManager(
+            supabase_client=supabase_client,
+            chromadb_client=chromadb_client,
+            chromadb_path=env_vars["CHROMADB_PATH"],
+        )
+
+        # Perform sync on startup
+        sync_manager.sync_on_startup()
+
+    except Exception as e:
+        console.print(f"[yellow]Warning: Sync check failed: {e}[/yellow]")
+        console.print("Continuing with local database...\n")
+
     console.print("Ask me anything about MRtrix3! Type '/exit' or Ctrl+C to quit.\n")
 
     try:
