@@ -149,6 +149,21 @@ warnings.filterwarnings("ignore", message="ALTS creds ignored")
 console = Console()
 
 
+async def get_user_input(loop, executor) -> str:
+    """Get user input with styled prompt."""
+    # Add spacing
+    console.print()
+
+    # Simple "User" label in green
+    console.print("[bold green]User[/bold green]")
+
+    # Get input with a green arrow prompt
+    console.print("[bright_green]▶[/bright_green] ", end="")
+    user_input = await loop.run_in_executor(executor, input, "")
+
+    return user_input
+
+
 class TokenManager:
     """Manages conversation token count with 500k limit."""
 
@@ -302,8 +317,8 @@ async def start_conversation():
     try:
         while True:
             try:
-                # Use executor for non-blocking input
-                user_input = await loop.run_in_executor(executor, input, "You: ")
+                # Get user input with styled prompt
+                user_input = await get_user_input(loop, executor)
 
                 if not user_input.strip():
                     continue
@@ -345,7 +360,7 @@ async def start_conversation():
                 if session_logger:
                     session_logger.log_gemini_response(response_text)
 
-                console.print("\n[bold cyan]Assistant:[/bold cyan]")
+                console.print("\n[bold red]Assistant:[/bold red]")
                 console.print(Markdown(response_text))
                 console.print()
 
