@@ -5,23 +5,117 @@ import os
 
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"  # Disable fork support to reduce warnings
 
 import asyncio
 import logging
+import os as os_module
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
+import select
 
 from dotenv import load_dotenv
 
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path, override=False)  # Load environment variables
 
+
+class StderrFilter:
+    """Filters stderr at the file descriptor level to suppress ALTS warnings."""
+
+    def __init__(self):
+        self.original_stderr_fd = None
+        self.pipe_read = None
+        self.pipe_write = None
+        self.filter_thread = None
+        self.stop_filtering = False
+
+    def start(self):
+        """Start filtering stderr."""
+        # Save original stderr
+        self.original_stderr_fd = os_module.dup(sys.stderr.fileno())
+
+        # Create pipe for capturing stderr
+        self.pipe_read, self.pipe_write = os_module.pipe()
+
+        # Make read end non-blocking
+        import fcntl
+
+        flags = fcntl.fcntl(self.pipe_read, fcntl.F_GETFL)
+        fcntl.fcntl(self.pipe_read, fcntl.F_SETFL, flags | os_module.O_NONBLOCK)
+
+        # Redirect stderr to our pipe
+        os_module.dup2(self.pipe_write, sys.stderr.fileno())
+        os_module.close(self.pipe_write)
+
+        # Start filter thread
+        self.stop_filtering = False
+        self.filter_thread = threading.Thread(target=self._filter_loop, daemon=True)
+        self.filter_thread.start()
+
+    def _filter_loop(self):
+        """Background thread that filters stderr output."""
+        while not self.stop_filtering:
+            try:
+                # Use select with timeout to check for data
+                ready, _, _ = select.select([self.pipe_read], [], [], 0.1)
+                if ready:
+                    data = os_module.read(self.pipe_read, 4096)
+                    if data:
+                        # Decode and filter
+                        text = data.decode("utf-8", errors="ignore")
+
+                        # Filter out ALTS warnings line by line
+                        lines = text.split("\n")
+                        filtered_lines = []
+                        for line in lines:
+                            if not any(
+                                msg in line
+                                for msg in [
+                                    "ALTS creds ignored",
+                                    "All log messages before absl::InitializeLog()",
+                                    "alts_credentials.cc",
+                                ]
+                            ):
+                                filtered_lines.append(line)
+
+                        # Write filtered output to original stderr
+                        filtered_text = "\n".join(filtered_lines)
+                        if filtered_text.strip():
+                            os_module.write(
+                                self.original_stderr_fd, filtered_text.encode("utf-8")
+                            )
+            except (OSError, BlockingIOError):
+                pass
+            except Exception:
+                pass  # Ignore errors in filter thread
+
+    def stop(self):
+        """Stop filtering and restore original stderr."""
+        if self.filter_thread:
+            self.stop_filtering = True
+            self.filter_thread.join(timeout=1)
+
+        if self.original_stderr_fd is not None:
+            # Restore original stderr
+            os_module.dup2(self.original_stderr_fd, sys.stderr.fileno())
+            os_module.close(self.original_stderr_fd)
+
+        if self.pipe_read is not None:
+            os_module.close(self.pipe_read)
+
+
+# Create global stderr filter instance (but don't start it yet)
+stderr_filter = StderrFilter()
+
 # Now safe to import other modules that may use environment variables
 import google.generativeai as genai  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
+from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 
 from src.agent.agent import MRtrixAssistant  # noqa: E402
 from src.agent.async_dependencies import create_async_dependencies  # noqa: E402
@@ -230,8 +324,20 @@ async def start_conversation():
                 if session_logger:
                     session_logger.log_user_query(user_input)
 
-                result = await agent.run(user_input)
-                response_text = result.output
+                # Add blank line before spinner for better readability
+                console.print()
+
+                # Run the agent with a spinner - ALTS warnings are suppressed by our stderr wrapper
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                    transient=True,  # Remove spinner when done
+                ) as progress:
+                    task = progress.add_task("[cyan]Thinking...", total=None)
+                    result = await agent.run(user_input)
+                    response_text = result.output
+                    progress.update(task, completed=100)
 
                 await token_manager.add_message(response_text)
 
@@ -275,6 +381,9 @@ async def start_conversation():
 
 async def main():
     """Entry point for CLI application."""
+    # Start stderr filtering only when running as main CLI
+    stderr_filter.start()
+
     gemini_key = os.getenv("GOOGLE_API_KEY")
     if not gemini_key:
         console.print("[red]Error: GOOGLE_API_KEY not found in environment[/red]")
@@ -297,6 +406,9 @@ if __name__ == "__main__":
         # Exit silently on any other exception during shutdown
         pass
     finally:
+        # Clean up stderr filter
+        stderr_filter.stop()
+
         # Force exit to avoid thread cleanup issues
         import os
 
