@@ -9,6 +9,8 @@ __pycache__/
 # Testing
 .pytest_cache/
 .coverage
+monitoring/logs/*.txt
+monitoring/logs/*.log
 
 # Tools
 .ruff_cache/

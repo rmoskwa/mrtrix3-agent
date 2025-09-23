@@ -373,14 +373,14 @@ class TestStartConversation:
 
         mock_agent.run.assert_called_once_with("Hello")
 
-    @patch.dict(os.environ, {"VERBOSE_MODE": "true"})
+    @patch.dict(os.environ, {"ENABLE_MONITORING": "true"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
     @patch("src.agent.cli.MRtrixAssistant")
     @patch("src.agent.cli.TokenManager")
     @patch("src.agent.cli.console")
-    async def test_verbose_mode(
+    async def test_monitoring_output(
         self,
         mock_console,
         MockTokenManager,
@@ -389,7 +389,7 @@ class TestStartConversation:
         MockExecutor,
         mock_get_loop,
     ):
-        """Test verbose mode output."""
+        """Test monitoring mode output (includes verbose and debug features)."""
         # Setup mock executor
         mock_executor = Mock()
         MockExecutor.return_value = mock_executor
@@ -423,14 +423,14 @@ class TestStartConversation:
                 if "Tokens used:" in str(call[0][0]):
                     found_token_print = True
                     break
-        assert found_token_print, "Verbose mode should print token usage"
+        assert found_token_print, "Monitoring mode should print token usage"
 
 
 @pytest.mark.asyncio
 class TestEnvironmentVariables:
     """Test environment variable configuration."""
 
-    @patch.dict(os.environ, {"DEBUG_MODE": "true"})
+    @patch.dict(os.environ, {"ENABLE_MONITORING": "true"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -448,7 +448,7 @@ class TestEnvironmentVariables:
         MockExecutor,
         mock_get_loop,
     ):
-        """Test debug mode from environment variable."""
+        """Test monitoring mode enables debug features."""
         # Setup mock executor
         mock_executor = Mock()
         MockExecutor.return_value = mock_executor
@@ -474,7 +474,7 @@ class TestEnvironmentVariables:
         mock_get_logger.assert_called()
         mock_logger.setLevel.assert_called_with(logging.DEBUG)
 
-    @patch.dict(os.environ, {"DEBUG_MODE": "false", "VERBOSE_MODE": "false"})
+    @patch.dict(os.environ, {"ENABLE_MONITORING": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -490,7 +490,7 @@ class TestEnvironmentVariables:
         MockExecutor,
         mock_get_loop,
     ):
-        """Test that debug and verbose are disabled by default."""
+        """Test that monitoring features are disabled by default."""
         # Setup mock executor
         mock_executor = Mock()
         MockExecutor.return_value = mock_executor

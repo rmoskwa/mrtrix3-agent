@@ -11,6 +11,7 @@ import logging
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -141,12 +142,64 @@ class TokenManager:
         self.message_history = []
 
 
+class TeeWriter:
+    """Write to both the original stream and log file."""
+
+    def __init__(self, original_stream, log_file):
+        self.original = original_stream
+        self.log_file = log_file
+
+    def write(self, data):
+        self.original.write(data)
+        self.log_file.write(data)
+        self.log_file.flush()
+
+    def flush(self):
+        self.original.flush()
+        self.log_file.flush()
+
+    def __getattr__(self, attr):
+        # Delegate all other attributes to the original stream
+        return getattr(self.original, attr)
+
+
 async def start_conversation():
     """Main conversation loop."""
-    debug_mode = os.getenv("DEBUG_MODE", "false").lower() == "true"
-    verbose = os.getenv("VERBOSE_MODE", "false").lower() == "true"
+    monitoring_enabled = os.getenv("ENABLE_MONITORING", "false").lower() == "true"
+    collect_logs = os.getenv("COLLECT_LOGS", "false").lower() == "true"
 
-    if debug_mode:
+    # Set up log file collection if enabled
+    log_file = None
+    log_file_path = None
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+
+    if collect_logs:
+        # Create logs directory
+        logs_dir = Path("monitoring/logs")
+        logs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create timestamped log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file_path = logs_dir / f"session_{timestamp}.txt"
+
+        try:
+            # Open log file and create tee writers
+            log_file = open(log_file_path, "w", encoding="utf-8")
+
+            # Replace stdout and stderr with tee writers
+            sys.stdout = TeeWriter(original_stdout, log_file)
+            sys.stderr = TeeWriter(original_stderr, log_file)
+
+            # Log session start
+            print(f"[Log Collection Enabled - Session log: {log_file_path}]\n")
+
+        except Exception as e:
+            print(f"[Warning: Could not create log file: {e}]")
+            collect_logs = False
+            log_file = None
+
+    if monitoring_enabled:
         logging.getLogger().setLevel(logging.DEBUG)
 
     console.print("[bold blue]MRtrix3 Assistant[/bold blue]")
@@ -213,7 +266,7 @@ async def start_conversation():
     except Exception as e:
         error_msg = get_user_friendly_message(e, "connecting to the knowledge base")
         console.print(f"[red]{error_msg}[/red]")
-        if debug_mode:
+        if monitoring_enabled:
             console.print(f"[dim]Debug: {e}[/dim]")
         return
 
@@ -243,8 +296,8 @@ async def start_conversation():
                     token_manager.reset()
                     await token_manager.add_message(user_input)
 
-                # Only show token count in verbose mode
-                if verbose:
+                # Show token count when monitoring is enabled
+                if monitoring_enabled:
                     console.print(
                         f"[dim]Tokens used: {token_manager.total_tokens}/{TokenManager.MAX_TOKENS}[/dim]"
                     )
@@ -302,7 +355,7 @@ async def start_conversation():
                     tool_name="conversation_loop",
                 )
 
-                if debug_mode:
+                if monitoring_enabled:
                     import traceback
 
                     traceback.print_exc()
@@ -325,6 +378,13 @@ async def start_conversation():
         except Exception:
             # Ignore cleanup errors during exit
             pass
+
+        # Restore original stdout/stderr and close log file if it was opened
+        if log_file:
+            print(f"\n[Session log saved to: {log_file_path}]")
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            log_file.close()
 
 
 async def main():
