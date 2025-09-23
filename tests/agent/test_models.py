@@ -35,15 +35,30 @@ class TestDocumentResult:
 class TestSearchToolParameters:
     """Test SearchToolParameters model."""
 
-    def test_valid_search_parameters(self):
-        """Test creating valid SearchToolParameters."""
-        params = SearchToolParameters(query="How to use mrconvert?")
-        assert params.query == "How to use mrconvert?"
+    def test_valid_single_query(self):
+        """Test creating SearchToolParameters with a single query string."""
+        params = SearchToolParameters(queries="How to use mrconvert?")
+        assert params.queries == ["How to use mrconvert?"]
 
-    def test_missing_query(self):
-        """Test that missing query raises validation error."""
+    def test_valid_multiple_queries(self):
+        """Test creating SearchToolParameters with multiple queries."""
+        params = SearchToolParameters(queries=["query1", "query2", "query3"])
+        assert params.queries == ["query1", "query2", "query3"]
+
+    def test_empty_queries_filtered(self):
+        """Test that empty queries are filtered out."""
+        params = SearchToolParameters(queries=["valid", "", "  ", "another"])
+        assert params.queries == ["valid", "another"]
+
+    def test_missing_queries(self):
+        """Test that missing queries raises validation error."""
         with pytest.raises(ValidationError):
             SearchToolParameters()
+
+    def test_all_empty_queries(self):
+        """Test that all empty queries raise validation error."""
+        with pytest.raises(ValidationError):
+            SearchToolParameters(queries=["", "  ", "\t"])
 
 
 class TestSearchKnowledgebaseDependencies:
@@ -76,7 +91,7 @@ class TestAgentConfiguration:
         assert config.model_name == "gemini-2.5-flash"
         assert config.embedding_model == "gemini-embedding-001"
         assert config.embedding_dimensions == 768
-        assert config.max_search_results == 3
+        assert config.max_search_results == 2
         assert config.return_top_n == 2
         assert config.system_prompt == ""
 

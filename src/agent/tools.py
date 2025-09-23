@@ -50,14 +50,14 @@ async def search_knowledgebase(
     all_results = []
 
     # Process each query
-    for query in query_list:
+    for idx, original_query in enumerate(query_list):
         # Input validation and sanitization
-        if not query or not query.strip():
+        if not original_query or not original_query.strip():
             logger.warning("Empty query in list, skipping")
             continue
 
         # Sanitize query - limit length and remove special characters that could be malicious
-        query = query.strip()[:500]  # Limit query length
+        query = original_query.strip()[:500]  # Limit query length
         sanitized_query = re.sub(
             r"[^\w\s\-.,!?]", " ", query
         )  # Keep alphanumeric and basic punctuation
@@ -69,7 +69,7 @@ async def search_knowledgebase(
                 pass  # Context manager handles logging
 
         # Get sync status for context (only log once)
-        if query_list.index(query) == 0:
+        if idx == 0:
             sync_status = _get_sync_status(ctx)
             if sync_status:
                 logger.debug(
@@ -86,11 +86,11 @@ async def search_knowledgebase(
             embedding = await embedding_service.generate_embedding(sanitized_query)
         except (TimeoutError, ConnectionError) as e:
             logger.warning(
-                f"Embedding generation failed for query '{query}', will retry: {e}"
+                f"Embedding generation failed for query '{original_query}', will retry: {e}"
             )
             raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
         except Exception as e:
-            logger.error(f"Permanent embedding error for query '{query}': {e}")
+            logger.error(f"Permanent embedding error for query '{original_query}': {e}")
             continue  # Skip this query, continue with others
 
         # Perform vector similarity search in ChromaDB
@@ -99,11 +99,14 @@ async def search_knowledgebase(
                 ctx, embedding, sanitized_query
             )
 
-            # Format results with query separators
+            # Format results with query separators (use original query for display)
+            display_query = original_query.strip()[
+                :100
+            ]  # Truncate for display if very long
             if query_results:
                 # Add query separator at the beginning
-                separator_start = f"--- Results from query: {query} ---"
-                separator_end = f"--- End of results from query: {query} ---"
+                separator_start = f"--- Results from query: {display_query} ---"
+                separator_end = f"--- End of results from query: {display_query} ---"
 
                 # Combine all results for this query
                 combined_content = separator_start + "\n"
@@ -114,21 +117,30 @@ async def search_knowledgebase(
                 # Create a single DocumentResult with all results for this query
                 all_results.append(
                     DocumentResult(
-                        title=f"Results for query: {query}", content=combined_content
+                        title=f"Results for query: {display_query}",
+                        content=combined_content,
                     )
                 )
             else:
                 # Even if no results, add a marker for this query
                 all_results.append(
                     DocumentResult(
-                        title=f"No results for query: {query}",
-                        content=f"--- Results from query: {query} ---\nNo matching documents found.\n--- End of results from query: {query} ---",
+                        title=f"No results for query: {display_query}",
+                        content=f"--- Results from query: {display_query} ---\nNo matching documents found.\n--- End of results from query: {display_query} ---",
                     )
                 )
 
         except Exception as e:
-            logger.error(f"Vector search failed for query '{query}': {e}")
-            continue  # Skip this query, continue with others
+            logger.error(f"Vector search failed for query '{original_query}': {e}")
+            # Add a "no results" entry for failed searches
+            display_query = original_query.strip()[:100]
+            all_results.append(
+                DocumentResult(
+                    title=f"No results for query: {display_query}",
+                    content=f"--- Results from query: {display_query} ---\nNo matching documents found.\n--- End of results from query: {display_query} ---",
+                )
+            )
+            continue  # Continue with other queries
 
     return all_results
 

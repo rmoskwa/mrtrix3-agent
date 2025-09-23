@@ -252,14 +252,16 @@ class TestSearchIntegration:
                 side_effect=Exception("Vector search error")
             )
 
-            # Should return empty list when vector search fails
+            # Should return result with "No matching documents found" when vector search fails
             results = await search_knowledgebase(real_context, "install")
 
             # Restore original method
             real_context.deps.chromadb_collection.query = original_query
 
-            # Should return empty list, not error
-            assert results == []
+            # Should return result with "No matching documents found" message
+            assert len(results) == 1
+            assert results[0].title == "No results for query: install"
+            assert "No matching documents found" in results[0].content
 
     @pytest.mark.asyncio
     async def test_search_with_special_characters(self, real_context):

@@ -50,12 +50,19 @@ class TestRAGSearch:
             # Run the search
             results = await search_knowledgebase(ctx, "How do I calculate DTI tensors?")
 
-        # Check that results were returned (top 2)
-        assert len(results) == 2
-        assert results[0].title == "MRtrix3 Command Reference: dwi2tensor"
-        assert results[1].title == "Tutorial: DTI Analysis"
+        # Check that results were returned (now combined in a single result)
+        assert len(results) == 1
+        assert results[0].title == "Results for query: How do I calculate DTI tensors?"
 
-        # Verify the content is properly formatted with XML tags
+        # Verify the content is properly formatted with query separators and XML tags
+        assert (
+            "--- Results from query: How do I calculate DTI tensors? ---"
+            in results[0].content
+        )
+        assert (
+            "--- End of results from query: How do I calculate DTI tensors? ---"
+            in results[0].content
+        )
         assert (
             "<Start of MRtrix3 Command Reference: dwi2tensor document>"
             in results[0].content
@@ -64,6 +71,7 @@ class TestRAGSearch:
             "</Start of MRtrix3 Command Reference: dwi2tensor document>"
             in results[0].content
         )
+        assert "<Start of Tutorial: DTI Analysis document>" in results[0].content
 
     async def test_no_documents_retrieved(self):
         """Test behavior when no documents are retrieved."""
@@ -96,8 +104,11 @@ class TestRAGSearch:
             # Run the search
             results = await search_knowledgebase(ctx, "Unknown query")
 
-        # Check that no results were returned
-        assert len(results) == 0
+        # Check that a result with "No matching documents found" message is returned
+        assert len(results) == 1
+        assert results[0].title == "No results for query: Unknown query"
+        assert "No matching documents found" in results[0].content
+        assert "--- Results from query: Unknown query ---" in results[0].content
 
     async def test_filters_by_distance_threshold(self):
         """Test that results are filtered by distance threshold."""
@@ -136,10 +147,12 @@ class TestRAGSearch:
             # Run the search
             results = await search_knowledgebase(ctx, "test query")
 
-        # Should only return first 2 (the third has distance > threshold)
-        assert len(results) == 2
-        assert results[0].title == "Close Match"
-        assert results[1].title == "Medium Match"
+        # Should return 1 combined result with first 2 documents (the third has distance > threshold)
+        assert len(results) == 1
+        assert results[0].title == "Results for query: test query"
+        assert "<Start of Close Match document>" in results[0].content
+        assert "<Start of Medium Match document>" in results[0].content
+        assert "<Start of Far Match document>" not in results[0].content
 
     async def test_handles_empty_query(self):
         """Test that empty queries return empty results."""

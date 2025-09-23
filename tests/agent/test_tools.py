@@ -99,10 +99,11 @@ class TestSearchKnowledgebase:
             # Execute search
             results = await search_knowledgebase(mock_context, "convert images")
 
-            # Verify results
-            assert len(results) == 2
+            # Verify results - now combined into single result
+            assert len(results) == 1
             assert isinstance(results[0], DocumentResult)
-            assert results[0].title == "mrconvert"
+            assert results[0].title == "Results for query: convert images"
+            assert "--- Results from query: convert images ---" in results[0].content
             assert "<Start of mrconvert document>" in results[0].content
             assert "</Start of mrconvert document>" in results[0].content
 
@@ -135,8 +136,10 @@ class TestSearchKnowledgebase:
             # Execute search
             results = await search_knowledgebase(mock_context, "convert images")
 
-            # Should return empty results when vector search fails
-            assert results == []
+            # Should return result with "No matching documents found" message when vector search fails
+            assert len(results) == 1
+            assert "No results for query: convert images" in results[0].title
+            assert "No matching documents found" in results[0].content
 
     @pytest.mark.asyncio
     async def test_no_results_found(self, mock_context):
@@ -151,7 +154,10 @@ class TestSearchKnowledgebase:
             )
 
             results = await search_knowledgebase(mock_context, "nonexistent topic")
-            assert results == []
+            # Should return result with "No matching documents found" message
+            assert len(results) == 1
+            assert results[0].title == "No results for query: nonexistent topic"
+            assert "No matching documents found" in results[0].content
 
     @pytest.mark.asyncio
     async def test_search_with_large_results(self, mock_context):
@@ -177,9 +183,12 @@ class TestSearchKnowledgebase:
 
             results = await search_knowledgebase(mock_context, "test query")
 
-            # Should only return top 2 results even if more are available
-            assert len(results) == 2
-            assert results[0].title == "Doc0"
+            # Should return 1 combined result with top 2 documents
+            assert len(results) == 1
+            assert results[0].title == "Results for query: test query"
+            # Verify first 2 docs are included (based on distance)
+            assert "<Start of Doc0 document>" in results[0].content
+            assert "<Start of Doc1 document>" in results[0].content
 
     @pytest.mark.asyncio
     async def test_search_with_empty_query(self, mock_context):
@@ -197,7 +206,10 @@ class TestSearchKnowledgebase:
             mock_embedding.generate_embedding = AsyncMock(return_value=[0.1] * 768)
 
             results = await search_knowledgebase(mock_context, "test query")
-            assert results == []
+            # Should return result with "No matching documents found" message
+            assert len(results) == 1
+            assert results[0].title == "No results for query: test query"
+            assert "No matching documents found" in results[0].content
 
 
 class TestFormatDocumentXML:
@@ -300,6 +312,9 @@ class TestSearchWithSpecialCases:
             results = await search_knowledgebase(mock_context, "test")
 
             # Should filter out results with distance > 0.3 (similarity < 0.7)
-            assert len(results) == 2
-            assert results[0].title == "Close Match"
-            assert results[1].title == "Medium Match"
+            # Results are combined into a single DocumentResult
+            assert len(results) == 1
+            assert results[0].title == "Results for query: test"
+            assert "<Start of Close Match document>" in results[0].content
+            assert "<Start of Medium Match document>" in results[0].content
+            assert "<Start of Far Match document>" not in results[0].content
