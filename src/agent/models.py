@@ -1,7 +1,7 @@
 """Pydantic data models for the MRtrix3 agent module."""
 
 import os
-from typing import Optional, TYPE_CHECKING, Any
+from typing import Optional, TYPE_CHECKING, Any, List, Union
 from pydantic import BaseModel, Field, field_validator
 
 # Use TYPE_CHECKING to avoid circular imports
@@ -27,17 +27,33 @@ class DocumentResult(BaseModel):
 class SearchToolParameters(BaseModel):
     """Parameters for the search_knowledgebase tool."""
 
-    query: str = Field(
-        ..., description="Natural language search query", min_length=1, max_length=500
+    queries: Union[str, List[str]] = Field(
+        ...,
+        description="Single query string or list of natural language search queries",
     )
 
-    @field_validator("query")
+    @field_validator("queries")
     @classmethod
-    def validate_query(cls, v: str) -> str:
-        """Validate and clean search query."""
-        if not v or not v.strip():
-            raise ValueError("Query cannot be empty")
-        return v.strip()
+    def validate_queries(cls, v: Union[str, List[str]]) -> List[str]:
+        """Validate and clean search queries, ensure it's always a list."""
+        # Convert single string to list
+        if isinstance(v, str):
+            queries = [v]
+        else:
+            queries = v
+
+        # Validate each query
+        validated = []
+        for query in queries:
+            if not query or not query.strip():
+                continue  # Skip empty queries
+            cleaned = query.strip()[:500]  # Limit each query length
+            validated.append(cleaned)
+
+        if not validated:
+            raise ValueError("At least one non-empty query is required")
+
+        return validated
 
 
 class BaseDependencies(BaseModel):
@@ -89,7 +105,7 @@ class AgentConfiguration(BaseModel):
         default=768, description="Vector dimensions", ge=1, le=2048
     )
     max_search_results: int = Field(
-        default=3, description="Top-k for similarity search", ge=1, le=10
+        default=2, description="Top-k for similarity search", ge=1, le=10
     )
     return_top_n: int = Field(
         default=2, description="Documents to return to agent", ge=1, le=10

@@ -9,7 +9,7 @@ database when needed to answer questions.
 import logging
 import re
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
 from pydantic_ai import RunContext, ModelRetry
 from .models import DocumentResult, SearchKnowledgebaseDependencies
@@ -20,7 +20,7 @@ logger = logging.getLogger("agent.tools")
 
 
 async def search_knowledgebase(
-    ctx: RunContext[SearchKnowledgebaseDependencies], query: str
+    ctx: RunContext[SearchKnowledgebaseDependencies], queries: Union[str, List[str]]
 ) -> List[DocumentResult]:
     """
     Tool to search MRtrix3 documentation in local ChromaDB.
@@ -31,57 +31,106 @@ async def search_knowledgebase(
     Args:
         ctx: PydanticAI context with dependencies including ChromaDB client,
              embedding service, and rate limiter
-        query: Natural language search query from the agent
+        queries: Single query string or list of natural language search queries
 
     Returns:
-        List of matching documents formatted with XML blocks
+        List of matching documents formatted with XML blocks and query separators
     """
-    # Input validation and sanitization
-    if not query or not query.strip():
-        logger.warning("Empty query provided")
+    # Normalize input to list of queries
+    if isinstance(queries, str):
+        query_list = [queries]
+    else:
+        query_list = queries
+
+    # Validate input
+    if not query_list:
+        logger.warning("No queries provided")
         return []
 
-    # Sanitize query - limit length and remove special characters that could be malicious
-    query = query.strip()[:500]  # Limit query length
-    sanitized_query = re.sub(
-        r"[^\w\s\-.,!?]", " ", query
-    )  # Keep alphanumeric and basic punctuation
+    all_results = []
 
-    # Log the RAG search query using session logger
-    session_logger = get_session_logger()
-    if session_logger:
-        with session_logger.rag_search(sanitized_query):
-            pass  # Context manager handles logging
+    # Process each query
+    for query in query_list:
+        # Input validation and sanitization
+        if not query or not query.strip():
+            logger.warning("Empty query in list, skipping")
+            continue
 
-    # Get sync status for context
-    sync_status = _get_sync_status(ctx)
-    if sync_status:
-        logger.debug(
-            f"Database last synced: {sync_status.get('last_sync_time', 'unknown')}"
-        )
+        # Sanitize query - limit length and remove special characters that could be malicious
+        query = query.strip()[:500]  # Limit query length
+        sanitized_query = re.sub(
+            r"[^\w\s\-.,!?]", " ", query
+        )  # Keep alphanumeric and basic punctuation
 
-    # Generate embedding for the agent's search query
-    try:
-        # Use embedding service from dependencies if available, otherwise create new
-        if hasattr(ctx.deps, "embedding_service") and ctx.deps.embedding_service:
-            embedding_service = ctx.deps.embedding_service
-        else:
-            embedding_service = EmbeddingService(ctx.deps.embedding_model)
-        embedding = await embedding_service.generate_embedding(sanitized_query)
-    except (TimeoutError, ConnectionError) as e:
-        logger.warning(f"Embedding generation failed, will retry: {e}")
-        raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
-    except Exception as e:
-        logger.error(f"Permanent embedding error: {e}")
-        return []
+        # Log the RAG search query using session logger
+        session_logger = get_session_logger()
+        if session_logger:
+            with session_logger.rag_search(sanitized_query):
+                pass  # Context manager handles logging
 
-    # Perform vector similarity search in ChromaDB
-    try:
-        results = await _search_chromadb_vector(ctx, embedding, sanitized_query)
-        return results if results else []
-    except Exception as e:
-        logger.error(f"Vector search failed: {e}")
-        return []
+        # Get sync status for context (only log once)
+        if query_list.index(query) == 0:
+            sync_status = _get_sync_status(ctx)
+            if sync_status:
+                logger.debug(
+                    f"Database last synced: {sync_status.get('last_sync_time', 'unknown')}"
+                )
+
+        # Generate embedding for the agent's search query
+        try:
+            # Use embedding service from dependencies if available, otherwise create new
+            if hasattr(ctx.deps, "embedding_service") and ctx.deps.embedding_service:
+                embedding_service = ctx.deps.embedding_service
+            else:
+                embedding_service = EmbeddingService(ctx.deps.embedding_model)
+            embedding = await embedding_service.generate_embedding(sanitized_query)
+        except (TimeoutError, ConnectionError) as e:
+            logger.warning(
+                f"Embedding generation failed for query '{query}', will retry: {e}"
+            )
+            raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
+        except Exception as e:
+            logger.error(f"Permanent embedding error for query '{query}': {e}")
+            continue  # Skip this query, continue with others
+
+        # Perform vector similarity search in ChromaDB
+        try:
+            query_results = await _search_chromadb_vector(
+                ctx, embedding, sanitized_query
+            )
+
+            # Format results with query separators
+            if query_results:
+                # Add query separator at the beginning
+                separator_start = f"--- Results from query: {query} ---"
+                separator_end = f"--- End of results from query: {query} ---"
+
+                # Combine all results for this query
+                combined_content = separator_start + "\n"
+                for result in query_results:
+                    combined_content += result.content + "\n"
+                combined_content += separator_end
+
+                # Create a single DocumentResult with all results for this query
+                all_results.append(
+                    DocumentResult(
+                        title=f"Results for query: {query}", content=combined_content
+                    )
+                )
+            else:
+                # Even if no results, add a marker for this query
+                all_results.append(
+                    DocumentResult(
+                        title=f"No results for query: {query}",
+                        content=f"--- Results from query: {query} ---\nNo matching documents found.\n--- End of results from query: {query} ---",
+                    )
+                )
+
+        except Exception as e:
+            logger.error(f"Vector search failed for query '{query}': {e}")
+            continue  # Skip this query, continue with others
+
+    return all_results
 
 
 async def _search_chromadb_vector(
@@ -112,9 +161,9 @@ async def _search_chromadb_vector(
         collection = ctx.deps.chromadb_collection
 
         # Get configuration settings
-        max_results = 3
+        max_results = 2
         if hasattr(ctx.deps, "config") and ctx.deps.config:
-            max_results = getattr(ctx.deps.config, "max_search_results", 3)
+            max_results = getattr(ctx.deps.config, "max_search_results", 2)
 
         # Query ChromaDB with embedding
         # ChromaDB returns results sorted by distance (smaller = more similar)
@@ -162,20 +211,20 @@ async def _search_chromadb_vector(
                 )
 
         # Log retrieved document titles for monitoring
-        final_results = formatted_results[:2]
-        if final_results:
+        # All results are returned (max 2 by configuration)
+        if formatted_results:
             # Log search results using session logger
             session_logger = get_session_logger()
             if session_logger:
-                session_logger.log_rag_results(final_results)
+                session_logger.log_rag_results(formatted_results)
         else:
             # Log no results using session logger
             session_logger = get_session_logger()
             if session_logger:
                 session_logger.log_rag_results([])
 
-        # Return top 2 results
-        return final_results
+        # Return all results (already limited to max 2 by configuration)
+        return formatted_results
 
     except Exception as e:
         logger.error(f"ChromaDB vector search error: {e}")
