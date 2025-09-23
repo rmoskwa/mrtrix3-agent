@@ -1,103 +1,138 @@
-"""Test log collection functionality."""
+"""Test session logging functionality."""
 
-import sys
 from pathlib import Path
-from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import patch
+import tempfile
 
-from src.agent.cli import TeeWriter
-
-
-class TestTeeWriter:
-    """Test the TeeWriter class for dual output."""
-
-    def test_tee_writer_writes_to_both_streams(self, tmp_path):
-        """Test that TeeWriter writes to both original stream and log file."""
-        # Create a mock for the original stream
-        original = Mock()
-        original.write = Mock(return_value=None)
-        original.flush = Mock(return_value=None)
-
-        # Create a temporary log file
-        log_file_path = tmp_path / "test.log"
-        with open(log_file_path, "w") as log_file:
-            tee = TeeWriter(original, log_file)
-
-            # Test write
-            tee.write("Test message")
-            original.write.assert_called_once_with("Test message")
-
-            # Test flush
-            tee.flush()
-            original.flush.assert_called_once()
-
-        # Check that log file contains the message
-        assert log_file_path.read_text() == "Test message"
-
-    def test_tee_writer_delegates_attributes(self):
-        """Test that TeeWriter delegates unknown attributes to original stream."""
-        original = Mock()
-        original.custom_attr = "custom_value"
-        log_file = Mock()
-
-        tee = TeeWriter(original, log_file)
-        assert tee.custom_attr == "custom_value"
-
-    def test_tee_writer_multiple_writes(self, tmp_path):
-        """Test that TeeWriter handles multiple writes correctly."""
-        original = Mock()
-        original.write = Mock(return_value=None)
-        original.flush = Mock(return_value=None)
-
-        log_file_path = tmp_path / "test.log"
-        with open(log_file_path, "w") as log_file:
-            tee = TeeWriter(original, log_file)
-
-            # Multiple writes
-            tee.write("Line 1\n")
-            tee.write("Line 2\n")
-            tee.write("Line 3\n")
-            tee.flush()
-
-        # Check both outputs
-        assert original.write.call_count == 3
-        assert original.flush.call_count == 1
-        assert log_file_path.read_text() == "Line 1\nLine 2\nLine 3\n"
+from src.agent.session_logger import (
+    SessionLogger,
+    initialize_session_logger,
+    cleanup_session_logger,
+)
 
 
-class TestLogCollectionIntegration:
-    """Test log collection integration."""
+class TestSessionLogger:
+    """Test the SessionLogger class for file-only logging."""
 
-    def test_log_file_creation(self):
-        """Test that log files are created in the correct location."""
-        # Create logs directory
-        logs_dir = Path("monitoring/logs")
-        logs_dir.mkdir(parents=True, exist_ok=True)
+    def test_session_logger_initialization_disabled(self):
+        """Test that SessionLogger doesn't create files when disabled."""
+        logger = SessionLogger()
+        log_path = logger.initialize(collect_logs=False)
 
-        # Create a test log file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file_path = logs_dir / f"test_{timestamp}.txt"
+        assert log_path is None
+        assert not logger.enabled
+        assert logger.log_file is None
 
-        # Test writing to log file with TeeWriter
-        original_stdout = sys.stdout
-        try:
-            with open(log_file_path, "w") as log_file:
-                sys.stdout = TeeWriter(original_stdout, log_file)
-                print("Test log message")
-                print("Another test message")
-        finally:
-            sys.stdout = original_stdout
+    def test_session_logger_initialization_enabled(self):
+        """Test that SessionLogger creates log file when enabled."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create the monitoring/logs structure
+            logs_dir = Path(tmp_dir) / "monitoring" / "logs"
+            logs_dir.mkdir(parents=True)
 
-        # Verify file exists and contains expected content
-        assert log_file_path.exists()
-        content = log_file_path.read_text()
-        assert "Test log message" in content
-        assert "Another test message" in content
+            # Patch Path to use our temp directory
+            with patch("src.agent.session_logger.Path") as mock_path:
+                mock_path.return_value = logs_dir
 
-        # Cleanup
-        log_file_path.unlink()
+                logger = SessionLogger()
+                log_path = logger.initialize(collect_logs=True)
 
-    def test_log_directory_structure(self):
+                assert logger.enabled
+                assert log_path is not None
+                assert logger.log_file is not None
+
+                # Clean up
+                logger.cleanup()
+
+    def test_session_logger_respects_enabled_flag(self):
+        """Test that logging methods respect the enabled flag."""
+        import logging
+
+        # Test with disabled logger
+        logger = SessionLogger()
+        logger.enabled = False
+
+        with patch.object(logging, "getLogger") as mock_get_logger:
+            logger.log_user_query("test query")
+            logger.log_gemini_response("test response")
+            logger.log_rag_results([])
+
+            # Should not call getLogger when disabled
+            mock_get_logger.assert_not_called()
+
+    def test_session_logger_cleanup(self):
+        """Test that cleanup properly closes resources."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logs_dir = Path(tmp_dir) / "monitoring" / "logs"
+            logs_dir.mkdir(parents=True)
+
+            with patch("src.agent.session_logger.Path") as mock_path:
+                mock_path.return_value = logs_dir
+
+                logger = SessionLogger()
+                logger.initialize(collect_logs=True)
+
+                # Ensure file is open
+                assert logger.log_file is not None
+                assert not logger.log_file.closed
+
+                # Clean up
+                logger.cleanup()
+
+                # File should be closed
+                assert logger.log_file.closed
+
+
+class TestSessionLoggerGlobal:
+    """Test global session logger functions."""
+
+    def test_initialize_session_logger_disabled(self):
+        """Test initializing with logging disabled."""
+        logger = initialize_session_logger(collect_logs=False)
+        assert logger is None
+
+    def test_initialize_session_logger_enabled(self):
+        """Test initializing with logging enabled."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logs_dir = Path(tmp_dir) / "monitoring" / "logs"
+            logs_dir.mkdir(parents=True)
+
+            with patch("src.agent.session_logger.Path") as mock_path:
+                mock_path.return_value = logs_dir
+
+                logger = initialize_session_logger(collect_logs=True)
+                assert logger is not None
+                assert logger.enabled
+
+                # Clean up
+                cleanup_session_logger()
+
+    def test_cleanup_session_logger(self):
+        """Test that cleanup_session_logger works correctly."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logs_dir = Path(tmp_dir) / "monitoring" / "logs"
+            logs_dir.mkdir(parents=True)
+
+            with patch("src.agent.session_logger.Path") as mock_path:
+                mock_path.return_value = logs_dir
+
+                # Initialize logger
+                logger = initialize_session_logger(collect_logs=True)
+                assert logger is not None
+
+                # Clean up
+                cleanup_session_logger()
+
+                # Logger should be cleaned up
+                import src.agent.session_logger as sl
+
+                assert sl._session_logger is None
+
+
+class TestLogFileCreation:
+    """Test actual log file creation and content."""
+
+    def test_log_file_structure(self):
         """Test that the log directory structure is correct."""
         logs_dir = Path("monitoring/logs")
 
@@ -108,3 +143,26 @@ class TestLogCollectionIntegration:
         # Should have a .gitkeep file
         gitkeep = logs_dir / ".gitkeep"
         assert gitkeep.exists()
+
+    def test_log_file_contains_session_markers(self):
+        """Test that log files contain proper session markers."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            logs_dir = Path(tmp_dir) / "monitoring" / "logs"
+            logs_dir.mkdir(parents=True)
+
+            with patch("src.agent.session_logger.Path") as mock_path:
+                mock_path.return_value = logs_dir
+
+                logger = SessionLogger()
+                log_path = logger.initialize(collect_logs=True)
+
+                # Clean up (writes end marker)
+                logger.cleanup()
+
+                # Read the log file
+                content = Path(log_path).read_text()
+
+                # Should have session markers
+                assert "[Session started:" in content
+                assert "[Log file:" in content
+                assert "[Session ended:" in content

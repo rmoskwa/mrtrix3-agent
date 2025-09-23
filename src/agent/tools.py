@@ -14,17 +14,11 @@ from pathlib import Path
 from pydantic_ai import RunContext, ModelRetry
 from .models import DocumentResult, SearchKnowledgebaseDependencies
 from .embedding_service import EmbeddingService
-from .monitoring_integration import (
-    track_tool_invocation,
-    get_dual_logger,
-)
+from .session_logger import get_session_logger
 
 logger = logging.getLogger("agent.tools")
-# Get dual loggers for monitoring
-user_logger, monitoring_logger = get_dual_logger("agent.tools")
 
 
-@track_tool_invocation("search_knowledgebase")
 async def search_knowledgebase(
     ctx: RunContext[SearchKnowledgebaseDependencies], query: str
 ) -> List[DocumentResult]:
@@ -53,7 +47,11 @@ async def search_knowledgebase(
         r"[^\w\s\-.,!?]", " ", query
     )  # Keep alphanumeric and basic punctuation
 
-    logger.info(f"Agent searching for: {sanitized_query}")
+    # Log the RAG search query using session logger
+    session_logger = get_session_logger()
+    if session_logger:
+        with session_logger.rag_search(sanitized_query):
+            pass  # Context manager handles logging
 
     # Get sync status for context
     sync_status = _get_sync_status(ctx)
@@ -87,7 +85,9 @@ async def search_knowledgebase(
 
 
 async def _search_chromadb_vector(
-    ctx: RunContext[SearchKnowledgebaseDependencies], embedding: List[float], query: str
+    ctx: RunContext[SearchKnowledgebaseDependencies],
+    embedding: List[float],
+    sanitized_query: str,
 ) -> List[DocumentResult]:
     """
     Perform vector similarity search in ChromaDB.
@@ -95,7 +95,7 @@ async def _search_chromadb_vector(
     Args:
         ctx: PydanticAI context with dependencies
         embedding: Query embedding vector
-        query: Original query text for logging
+        sanitized_query: Sanitized query text for logging
 
     Returns:
         List of matching documents
@@ -125,7 +125,7 @@ async def _search_chromadb_vector(
         )
 
         if not results or not results.get("documents"):
-            logger.info(f"No vector search results for query: {query}")
+            logger.info(f"No vector search results for query: {sanitized_query}")
             return []
 
         # Extract and format results
@@ -148,14 +148,34 @@ async def _search_chromadb_vector(
         for doc, metadata, distance in zip(documents, metadatas, distances):
             if distance <= threshold:
                 title = metadata.get("title", "Untitled") if metadata else "Untitled"
+                similarity_score = 1 - distance  # Convert distance to similarity
+
+                # Log individual document retrieval with score
+                logger.debug(
+                    f"Retrieved: '{title}' (similarity: {similarity_score:.3f})"
+                )
+
                 formatted_results.append(
                     DocumentResult(
                         title=title, content=_format_document_xml(title, doc)
                     )
                 )
 
+        # Log retrieved document titles for monitoring
+        final_results = formatted_results[:2]
+        if final_results:
+            # Log search results using session logger
+            session_logger = get_session_logger()
+            if session_logger:
+                session_logger.log_rag_results(final_results)
+        else:
+            # Log no results using session logger
+            session_logger = get_session_logger()
+            if session_logger:
+                session_logger.log_rag_results([])
+
         # Return top 2 results
-        return formatted_results[:2]
+        return final_results
 
     except Exception as e:
         logger.error(f"ChromaDB vector search error: {e}")

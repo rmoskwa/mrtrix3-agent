@@ -11,13 +11,12 @@ import logging
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 env_path = Path(__file__).parent.parent.parent / ".env"
-load_dotenv(env_path, override=True)
+load_dotenv(env_path, override=False)  # Load environment variables
 
 # Now safe to import other modules that may use environment variables
 import google.generativeai as genai  # noqa: E402
@@ -26,41 +25,18 @@ from rich.markdown import Markdown  # noqa: E402
 
 from src.agent.agent import MRtrixAssistant  # noqa: E402
 from src.agent.async_dependencies import create_async_dependencies  # noqa: E402
-from src.agent.error_messages import get_user_friendly_message, log_and_get_message  # noqa: E402
+from src.agent.error_messages import get_user_friendly_message  # noqa: E402
 from src.agent.sync_manager import DatabaseSyncManager  # noqa: E402
 from src.agent.dependencies import validate_environment  # noqa: E402
 from src.agent.local_storage_manager import LocalDatabaseManager  # noqa: E402
-
-# Import monitoring functions - the dynamic check will handle env vars properly
-from src.agent.monitoring_integration import (  # noqa: E402
-    is_monitoring_enabled,
-    get_dual_logger,
-    log_dual,
-    set_monitoring_request_id,
-    clear_monitoring_request_id,
-    _initialize_monitoring,
+from src.agent.session_logger import (  # noqa: E402
+    initialize_session_logger,
+    cleanup_session_logger,
 )
 
 # Set up logging - only show warnings and above by default
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 logger = logging.getLogger("agent.cli")
-
-# Initialize monitoring if enabled
-if is_monitoring_enabled():
-    # Try to initialize monitoring
-    if _initialize_monitoring():
-        from monitoring.logging_config import configure_structured_logging
-
-        configure_structured_logging()
-        # Get dual loggers for CLI
-        user_logger, monitoring_logger = get_dual_logger("agent.cli")
-        print("Monitoring system initialized")
-    else:
-        user_logger = logger
-        monitoring_logger = None
-else:
-    user_logger = logger
-    monitoring_logger = None
 
 # Suppress verbose HTTP and AI service logging
 logging.getLogger("httpcore").setLevel(logging.ERROR)
@@ -142,65 +118,19 @@ class TokenManager:
         self.message_history = []
 
 
-class TeeWriter:
-    """Write to both the original stream and log file."""
-
-    def __init__(self, original_stream, log_file):
-        self.original = original_stream
-        self.log_file = log_file
-
-    def write(self, data):
-        self.original.write(data)
-        self.log_file.write(data)
-        self.log_file.flush()
-
-    def flush(self):
-        self.original.flush()
-        self.log_file.flush()
-
-    def __getattr__(self, attr):
-        # Delegate all other attributes to the original stream
-        return getattr(self.original, attr)
-
-
 async def start_conversation():
     """Main conversation loop."""
-    monitoring_enabled = os.getenv("ENABLE_MONITORING", "false").lower() == "true"
+    # Single variable controls logging (to file only, never to terminal)
     collect_logs = os.getenv("COLLECT_LOGS", "false").lower() == "true"
 
-    # Set up log file collection if enabled
-    log_file = None
-    log_file_path = None
-    original_stdout = sys.stdout
-    original_stderr = sys.stderr
+    # Initialize session logging
+    session_logger = initialize_session_logger(collect_logs=collect_logs)
 
     if collect_logs:
-        # Create logs directory
-        logs_dir = Path("monitoring/logs")
-        logs_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create timestamped log file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file_path = logs_dir / f"session_{timestamp}.txt"
-
-        try:
-            # Open log file and create tee writers
-            log_file = open(log_file_path, "w", encoding="utf-8")
-
-            # Replace stdout and stderr with tee writers
-            sys.stdout = TeeWriter(original_stdout, log_file)
-            sys.stderr = TeeWriter(original_stderr, log_file)
-
-            # Log session start
-            print(f"[Log Collection Enabled - Session log: {log_file_path}]\n")
-
-        except Exception as e:
-            print(f"[Warning: Could not create log file: {e}]")
-            collect_logs = False
-            log_file = None
-
-    if monitoring_enabled:
+        # Set appropriate logging levels for collection
         logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger("agent.cli").setLevel(logging.INFO)
+        logging.getLogger("agent.tools").setLevel(logging.INFO)
 
     console.print("[bold blue]MRtrix3 Assistant[/bold blue]")
     console.print("Initializing local database...\n")
@@ -228,7 +158,7 @@ async def start_conversation():
                 console.print("[yellow]Continuing with potential issues...[/yellow]")
 
         # Initialize collection with schema migration if needed
-        collection = local_manager.initialize_collection()
+        local_manager.initialize_collection()
 
         # Clean up old temp files
         cleaned = local_manager.cleanup_temp_files(older_than_hours=24)
@@ -266,8 +196,6 @@ async def start_conversation():
     except Exception as e:
         error_msg = get_user_friendly_message(e, "connecting to the knowledge base")
         console.print(f"[red]{error_msg}[/red]")
-        if monitoring_enabled:
-            console.print(f"[dim]Debug: {e}[/dim]")
         return
 
     agent = MRtrixAssistant(dependencies=deps)
@@ -296,47 +224,20 @@ async def start_conversation():
                     token_manager.reset()
                     await token_manager.add_message(user_input)
 
-                # Show token count when monitoring is enabled
-                if monitoring_enabled:
-                    console.print(
-                        f"[dim]Tokens used: {token_manager.total_tokens}/{TokenManager.MAX_TOKENS}[/dim]"
-                    )
+                # Token count is logged to file if logging is enabled
 
-                # Set request ID for monitoring correlation
-                request_id = set_monitoring_request_id()
-
-                # Log query start with monitoring
-                if monitoring_logger:
-                    log_dual(
-                        user_logger,
-                        monitoring_logger,
-                        "info",
-                        "",  # No user message needed
-                        f"Processing query: {user_input[:100]}...",
-                        request_id=request_id,
-                        tokens_used=token_manager.total_tokens,
-                    )
+                # Log the user's query using session logger
+                if session_logger:
+                    session_logger.log_user_query(user_input)
 
                 result = await agent.run(user_input)
                 response_text = result.output
 
                 await token_manager.add_message(response_text)
 
-                # Log completion with monitoring
-                if monitoring_logger:
-                    log_dual(
-                        user_logger,
-                        monitoring_logger,
-                        "info",
-                        "",  # No user message needed
-                        "Query processed successfully",
-                        request_id=request_id,
-                        response_length=len(response_text),
-                        total_tokens=token_manager.total_tokens,
-                    )
-
-                # Clear request ID after processing
-                clear_monitoring_request_id()
+                # Log Gemini's response using session logger
+                if session_logger:
+                    session_logger.log_gemini_response(response_text)
 
                 console.print("\n[bold cyan]Assistant:[/bold cyan]")
                 console.print(Markdown(response_text))
@@ -347,20 +248,8 @@ async def start_conversation():
                 break
 
             except Exception as e:
-                # Log error with context and get user-friendly message
-                user_message = log_and_get_message(
-                    e,
-                    severity="error",
-                    user_query=user_input if "user_input" in locals() else None,
-                    tool_name="conversation_loop",
-                )
-
-                if monitoring_enabled:
-                    import traceback
-
-                    traceback.print_exc()
-                    console.print(f"\n[red]Debug: {e}[/red]")
-
+                # Get user-friendly message
+                user_message = get_user_friendly_message(e, "processing your request")
                 console.print(f"\n[yellow]{user_message}[/yellow]\n")
 
     finally:
@@ -379,12 +268,9 @@ async def start_conversation():
             # Ignore cleanup errors during exit
             pass
 
-        # Restore original stdout/stderr and close log file if it was opened
-        if log_file:
-            print(f"\n[Session log saved to: {log_file_path}]")
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            log_file.close()
+        # Clean up session logging
+        if session_logger:
+            cleanup_session_logger()
 
 
 async def main():

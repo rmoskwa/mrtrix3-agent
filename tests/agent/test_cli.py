@@ -1,6 +1,5 @@
 """Unit tests for CLI interface."""
 
-import logging
 import os
 from unittest.mock import Mock, patch, AsyncMock
 import pytest
@@ -106,6 +105,7 @@ class TestTokenManager:
 class TestStartConversation:
     """Test main conversation loop."""
 
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -147,6 +147,7 @@ class TestStartConversation:
         mock_agent.run.assert_not_called()
         mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -188,6 +189,7 @@ class TestStartConversation:
         mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
         assert mock_console.print.call_count >= 2  # Welcome message and instruction
 
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -233,6 +235,7 @@ class TestStartConversation:
         assert mock_token_mgr.add_message.call_count == 2
         mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -280,6 +283,7 @@ class TestStartConversation:
             "[yellow]Token limit reached. Starting new session.[/yellow]"
         )
 
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -330,6 +334,7 @@ class TestStartConversation:
             error_message_found
         ), f"Expected user-friendly error message, got calls: {calls}"
 
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -373,108 +378,12 @@ class TestStartConversation:
 
         mock_agent.run.assert_called_once_with("Hello")
 
-    @patch.dict(os.environ, {"ENABLE_MONITORING": "true"})
-    @patch("asyncio.get_event_loop")
-    @patch("src.agent.cli.ThreadPoolExecutor")
-    @patch("src.agent.cli.create_async_dependencies")
-    @patch("src.agent.cli.MRtrixAssistant")
-    @patch("src.agent.cli.TokenManager")
-    @patch("src.agent.cli.console")
-    async def test_monitoring_output(
-        self,
-        mock_console,
-        MockTokenManager,
-        MockAssistant,
-        mock_create_deps,
-        MockExecutor,
-        mock_get_loop,
-    ):
-        """Test monitoring mode output (includes verbose and debug features)."""
-        # Setup mock executor
-        mock_executor = Mock()
-        MockExecutor.return_value = mock_executor
-        mock_executor.shutdown = Mock()
-
-        # Setup mock loop
-        mock_loop = AsyncMock()
-        mock_get_loop.return_value = mock_loop
-        mock_loop.run_in_executor.side_effect = ["Test", "/exit"]
-
-        mock_deps = AsyncMock()
-        mock_create_deps.return_value = mock_deps
-
-        mock_agent = AsyncMock()
-        mock_result = Mock()
-        mock_result.output = "Response"
-        mock_agent.run.return_value = mock_result
-        MockAssistant.return_value = mock_agent
-
-        mock_token_mgr = AsyncMock()
-        mock_token_mgr.add_message.return_value = True
-        mock_token_mgr.total_tokens = 100
-        MockTokenManager.return_value = mock_token_mgr
-
-        await start_conversation()
-
-        # Check that mock_console.print was called with a string containing token info
-        found_token_print = False
-        for call in mock_console.print.call_args_list:
-            if call[0] and len(call[0]) > 0:
-                if "Tokens used:" in str(call[0][0]):
-                    found_token_print = True
-                    break
-        assert found_token_print, "Monitoring mode should print token usage"
-
 
 @pytest.mark.asyncio
 class TestEnvironmentVariables:
     """Test environment variable configuration."""
 
-    @patch.dict(os.environ, {"ENABLE_MONITORING": "true"})
-    @patch("asyncio.get_event_loop")
-    @patch("src.agent.cli.ThreadPoolExecutor")
-    @patch("src.agent.cli.create_async_dependencies")
-    @patch("src.agent.cli.MRtrixAssistant")
-    @patch("src.agent.cli.TokenManager")
-    @patch("src.agent.cli.console")
-    @patch("logging.getLogger")
-    async def test_debug_mode_env(
-        self,
-        mock_get_logger,
-        mock_console,
-        MockTokenManager,
-        MockAssistant,
-        mock_create_deps,
-        MockExecutor,
-        mock_get_loop,
-    ):
-        """Test monitoring mode enables debug features."""
-        # Setup mock executor
-        mock_executor = Mock()
-        MockExecutor.return_value = mock_executor
-        mock_executor.shutdown = Mock()
-
-        # Setup mock loop
-        mock_loop = AsyncMock()
-        mock_get_loop.return_value = mock_loop
-        mock_loop.run_in_executor.side_effect = ["/exit"]
-
-        mock_deps = AsyncMock()
-        mock_create_deps.return_value = mock_deps
-        mock_agent = AsyncMock()
-        MockAssistant.return_value = mock_agent
-        mock_token_mgr = AsyncMock()
-        MockTokenManager.return_value = mock_token_mgr
-
-        mock_logger = Mock()
-        mock_get_logger.return_value = mock_logger
-
-        await start_conversation()
-
-        mock_get_logger.assert_called()
-        mock_logger.setLevel.assert_called_with(logging.DEBUG)
-
-    @patch.dict(os.environ, {"ENABLE_MONITORING": "false"})
+    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
     @patch("src.agent.cli.ThreadPoolExecutor")
     @patch("src.agent.cli.create_async_dependencies")
@@ -490,7 +399,7 @@ class TestEnvironmentVariables:
         MockExecutor,
         mock_get_loop,
     ):
-        """Test that monitoring features are disabled by default."""
+        """Test that logging is disabled when COLLECT_LOGS=false."""
         # Setup mock executor
         mock_executor = Mock()
         MockExecutor.return_value = mock_executor
@@ -499,7 +408,7 @@ class TestEnvironmentVariables:
         # Setup mock loop
         mock_loop = AsyncMock()
         mock_get_loop.return_value = mock_loop
-        mock_loop.run_in_executor.side_effect = ["Test", "/exit"]
+        mock_loop.run_in_executor.side_effect = ["/exit"]
 
         mock_deps = AsyncMock()
         mock_create_deps.return_value = mock_deps
@@ -512,18 +421,17 @@ class TestEnvironmentVariables:
 
         mock_token_mgr = AsyncMock()
         mock_token_mgr.add_message.return_value = True
-        mock_token_mgr.total_tokens = 100
         MockTokenManager.return_value = mock_token_mgr
 
         await start_conversation()
 
-        # Should not print token info when verbose is false
-        found_token_print = False
+        # Should not print session logging message when COLLECT_LOGS=false
+        found_log_message = False
         for call in mock_console.print.call_args_list:
             if call[0] and len(call[0]) > 0:
-                if "Tokens used:" in str(call[0][0]):
-                    found_token_print = True
+                if "Session logging to:" in str(call[0][0]):
+                    found_log_message = True
                     break
         assert (
-            not found_token_print
-        ), "Should not print token usage when verbose is disabled"
+            not found_log_message
+        ), "Should not show session logging message when disabled"
