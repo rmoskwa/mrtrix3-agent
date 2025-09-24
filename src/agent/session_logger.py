@@ -53,8 +53,7 @@ class SessionLogger:
             # Log session start
             self._log_session_start()
 
-            # Print minimal message to console
-            print(f"[Session logging to: {self.log_file_path}]")
+            # Session logging is active but no console output
 
             return self.log_file_path
 
@@ -104,7 +103,7 @@ class SessionLogger:
                 f"\n[Session ended: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]\n"
             )
             self.log_file.close()
-            print(f"[Session log saved to: {self.log_file_path}]")
+            # Session log saved but no console output
 
     @contextmanager
     def rag_search(self, query: str):

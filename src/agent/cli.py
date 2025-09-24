@@ -116,6 +116,7 @@ import google.generativeai as genai  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
+from rich.padding import Padding  # noqa: E402
 
 from src.agent.agent import MRtrixAssistant  # noqa: E402
 from src.agent.async_dependencies import create_async_dependencies  # noqa: E402
@@ -139,9 +140,10 @@ logging.getLogger("hpack").setLevel(logging.ERROR)
 logging.getLogger("google_genai").setLevel(logging.ERROR)
 logging.getLogger("agent.tools").setLevel(logging.WARNING)
 logging.getLogger("agent.embedding").setLevel(logging.WARNING)
-logging.getLogger("markdown_it").setLevel(
-    logging.ERROR
-)  # Suppress markdown parsing debug
+logging.getLogger("markdown_it").setLevel(logging.ERROR)
+# Suppress ChromaDB's internal logging
+logging.getLogger("chromadb").setLevel(logging.ERROR)
+logging.getLogger("chromadb.config").setLevel(logging.ERROR)
 
 # Suppress ALTS warnings
 warnings.filterwarnings("ignore", message="ALTS creds ignored")
@@ -156,9 +158,10 @@ async def get_user_input(loop, executor) -> str:
 
     # Simple "User" label in green
     console.print("[bold green]User[/bold green]")
+    console.print("[bold green]----[/bold green]")
 
     # Get input with a green arrow prompt
-    console.print("[bright_green]▶[/bright_green] ", end="")
+    console.print("[bright_green]▶ [/bright_green] ", end="")
     user_input = await loop.run_in_executor(executor, input, "")
 
     return user_input
@@ -241,8 +244,7 @@ async def start_conversation():
         logging.getLogger("agent.cli").setLevel(logging.INFO)
         logging.getLogger("agent.tools").setLevel(logging.INFO)
 
-    console.print("[bold blue]MRtrix3 Assistant[/bold blue]")
-    console.print("Initializing local database...\n")
+    # Start without title - MRtrixBot will be shown after sync
 
     # Run sync check before creating dependencies
     local_manager = None
@@ -298,7 +300,11 @@ async def start_conversation():
         if local_manager:
             local_manager.lock_manager.release_lock()
 
-    console.print("Ask me anything about MRtrix3! Type '/exit' or Ctrl+C to quit.\n")
+    # Display MRtrixBot with blue padding
+    console.print()
+    padding = Padding("MRtrixBot", (2, 4), style="bold white on blue", expand=False)
+    console.print(padding, justify="center")
+    console.print()
 
     try:
         deps = await create_async_dependencies()
@@ -361,6 +367,7 @@ async def start_conversation():
                     session_logger.log_gemini_response(response_text)
 
                 console.print("\n[bold red]Assistant:[/bold red]")
+                console.print("[bold red]----------[/bold red]")
                 console.print(Markdown(response_text))
                 console.print()
 

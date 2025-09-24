@@ -120,9 +120,7 @@ async def create_async_dependencies() -> AsyncSearchKnowledgebaseDependencies:
 
     try:
         # Create async Supabase client with retry
-        logger.info("Creating async Supabase client...")
         supabase = await acreate_client(url, key)
-        logger.info("Supabase client created successfully")
     except Exception as e:
         logger.error(f"Failed to create Supabase client: {e}")
         raise ConnectionError(f"Failed to connect to Supabase: {e}") from e
@@ -136,10 +134,8 @@ async def create_async_dependencies() -> AsyncSearchKnowledgebaseDependencies:
     chromadb_path = os.path.expanduser(chromadb_path)
 
     try:
-        logger.info(f"Setting up ChromaDB at {chromadb_path}...")
         chromadb_client = setup_chromadb_client(chromadb_path)
         chromadb_collection = initialize_chromadb_collection(chromadb_client)
-        logger.info("ChromaDB initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize ChromaDB: {e}")
         # ChromaDB is optional, so we don't raise an error
