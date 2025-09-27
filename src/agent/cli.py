@@ -116,9 +116,10 @@ import google.generativeai as genai  # noqa: E402
 from rich.console import Console, ConsoleOptions, RenderResult  # noqa: E402
 from rich.markdown import Markdown, CodeBlock  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
-from rich.panel import Panel  # noqa: E402
 from rich.syntax import Syntax  # noqa: E402
 from rich.text import Text  # noqa: E402
+from rich.panel import Panel  # noqa: E402
+from rich.theme import Theme  # noqa: E402
 from pyfiglet import figlet_format  # noqa: E402
 
 from src.agent.agent import MRtrixAssistant  # noqa: E402
@@ -152,7 +153,14 @@ logging.getLogger("chromadb.config").setLevel(logging.ERROR)
 # Suppress ALTS warnings
 warnings.filterwarnings("ignore", message="ALTS creds ignored")
 
-console = Console()
+# Create custom theme for inline code (no background, bold)
+custom_theme = Theme(
+    {
+        "markdown.code": "bold bright_blue",  # Inline code - bold blue with no background
+    }
+)
+
+console = Console(theme=custom_theme)
 
 
 def prettier_code_blocks():
@@ -207,6 +215,7 @@ def prettier_code_blocks():
                 style="bright_black",
             )
 
+    # Apply custom styles to Markdown elements
     Markdown.elements["fence"] = SimpleCodeBlock
 
 
