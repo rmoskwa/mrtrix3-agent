@@ -89,8 +89,8 @@ class SlashCommandHandler:
         """Handle /exit command."""
         return SlashCommandResult(success=True, exit_requested=True)
 
-    def _handle_help(self, args: str) -> SlashCommandResult:
-        """Handle /help command."""
+    def display_help(self):
+        """Display available commands (public method for external use)."""
         console.print("\n[bold]Available Commands:[/bold]")
 
         # Calculate max command length for alignment
@@ -104,6 +104,10 @@ class SlashCommandHandler:
                 console.print(f"  {cmd:<{max_len}}                 - {desc}")
 
         console.print()
+
+    def _handle_help(self, args: str) -> SlashCommandResult:
+        """Handle /help command."""
+        self.display_help()
         return SlashCommandResult(success=True, continue_conversation=False)
 
     def _handle_sharefile(self, args: str) -> SlashCommandResult:

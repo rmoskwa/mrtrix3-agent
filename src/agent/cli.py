@@ -116,7 +116,7 @@ import google.generativeai as genai  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
-from rich.padding import Padding  # noqa: E402
+from rich.panel import Panel  # noqa: E402
 
 from src.agent.agent import MRtrixAssistant  # noqa: E402
 from src.agent.async_dependencies import create_async_dependencies  # noqa: E402
@@ -301,10 +301,16 @@ async def start_conversation():
         if local_manager:
             local_manager.lock_manager.release_lock()
 
-    # Display MRtrixBot with blue padding
+    # Display MRtrixBot with border only (no fill)
     console.print()
-    padding = Padding("MRtrixBot", (2, 4), style="bold white on blue", expand=False)
-    console.print(padding, justify="center")
+    panel = Panel(
+        "[bold red]MRtrixBot[/bold red]",
+        style="bold red",
+        border_style="red",
+        expand=False,
+        padding=(2, 8),
+    )
+    console.print(panel, justify="center")
     console.print()
 
     try:
@@ -317,6 +323,9 @@ async def start_conversation():
     agent = MRtrixAssistant(dependencies=deps)
     token_manager = TokenManager()
     slash_handler = SlashCommandHandler()
+
+    # Display available commands at startup
+    slash_handler.display_help()
 
     # Conversation history for maintaining context
     conversation_history = []
