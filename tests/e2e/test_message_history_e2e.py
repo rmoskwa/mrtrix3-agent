@@ -488,37 +488,43 @@ async def test_message_history_integration_with_token_manager():
     """Test integration between message history and TokenManager."""
     from src.agent.cli import TokenManager
 
-    token_manager = TokenManager(max_tokens=1000)
+    # Mock the Gemini model to avoid API calls
+    with patch("src.agent.cli.genai.GenerativeModel") as MockModel:
+        mock_model = Mock()
+        mock_result = Mock()
+        mock_result.total_tokens = 10  # Simulate token count
+        mock_model.count_tokens.return_value = mock_result
+        MockModel.return_value = mock_model
 
-    # Create sample messages
-    sample_messages = [
-        ModelRequest(parts=[UserPromptPart(content="Short question")]),
-        ModelResponse(parts=[TextPart(content="Short answer")]),
-    ]
+        token_manager = TokenManager()
 
-    # Add messages to token manager
-    for msg in sample_messages:
-        success = token_manager.add_message(msg)
-        assert success is True
+        # Create sample messages as strings
+        sample_messages = [
+            "Short question",
+            "Short answer",
+        ]
 
-    # Verify messages are stored
-    history = token_manager.get_messages()
-    assert len(history) == 2
-    assert history[0].parts[0].content == "Short question"
-    assert history[1].parts[0].content == "Short answer"
+        # Add messages to token manager
+        for msg in sample_messages:
+            success = await token_manager.add_message(msg)
+            assert success is True
 
-    # Add a message that would exceed limit
-    long_message = ModelRequest(
-        parts=[UserPromptPart(content="x" * 1000)]  # Very long content
-    )
-    success = token_manager.add_message(long_message)
-    assert success is False  # Should fail due to token limit
+        # Verify messages were added (check internal state)
+        assert len(token_manager.message_history) == 2
+        assert token_manager.message_history[0][0] == "Short question"
+        assert token_manager.message_history[1][0] == "Short answer"
 
-    # History should remain unchanged
-    history_after = token_manager.get_messages()
-    assert len(history_after) == 2
+        # Add a message that would exceed limit
+        # Set token count to exceed limit
+        mock_result.total_tokens = 600000
+        long_message = "x" * 1000
+        success = await token_manager.add_message(long_message)
+        assert success is False  # Should fail due to token limit
 
-    # Reset and verify cleanup
-    token_manager.reset()
-    history_reset = token_manager.get_messages()
-    assert len(history_reset) == 0
+        # History should remain unchanged
+        assert len(token_manager.message_history) == 2
+
+        # Reset and verify cleanup
+        token_manager.reset()
+        assert len(token_manager.message_history) == 0
+        assert token_manager.total_tokens == 0
