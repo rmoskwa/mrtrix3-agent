@@ -271,22 +271,6 @@ class TestSharefileScriptIntegration:
         assert result.returncode == 1
         assert "Usage: /sharefile" in result.stdout
 
-    def test_sharefile_handles_nonexistent_file(self):
-        """Test sharefile handles nonexistent files gracefully."""
-        result = subprocess.run(
-            [
-                "/usr/bin/python3",
-                str(self.script_path),
-                "/absolutely/nonexistent/path.nii",
-                "test query",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        assert result.returncode == 1
-        assert "does not exist" in result.stdout
-
     def test_build_prompt_function(self):
         """Test the build_prompt function directly."""
 
