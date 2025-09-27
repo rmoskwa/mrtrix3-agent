@@ -16,6 +16,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
 import select
+import termios
+
+try:
+    import readline  # Enable readline support for arrow keys
+
+    readline.parse_and_bind("tab: complete")  # Use readline to enable tab completion
+except ImportError:
+    pass  # readline not available on all platforms
 
 from dotenv import load_dotenv
 
@@ -232,9 +240,10 @@ async def get_user_input(loop, executor) -> str:
     console.print("[bold green]User[/bold green]")
     console.print("[bold green]----[/bold green]")
 
-    # Get input with a green arrow prompt
-    console.print("[bright_green]▶ [/bright_green] ", end="")
-    user_input = await loop.run_in_executor(executor, input, "")
+    console.print("[bright_green]▶ [/bright_green]", end="")
+    sys.stdout.flush()  # Ensure prompt is visible before input
+
+    user_input = await loop.run_in_executor(executor, input)
 
     return user_input
 
@@ -508,22 +517,44 @@ async def start_conversation():
 
 async def main():
     """Entry point for CLI application."""
-    # Start stderr filtering only when running as main CLI
-    stderr_filter.start()
+    # Save original terminal settings
+    original_term_settings = None
+    try:
+        original_term_settings = termios.tcgetattr(sys.stdin)
+    except (OSError, termios.error):
+        pass  # Not a terminal or termios not available
 
-    gemini_key = os.getenv("GOOGLE_API_KEY")
-    if not gemini_key:
-        console.print("[red]Error: GOOGLE_API_KEY not found in environment[/red]")
-        console.print(f"[yellow]Attempted to load .env from: {env_path}[/yellow]")
-        console.print(f"[yellow]File exists: {env_path.exists()}[/yellow]")
-        sys.exit(1)
+    try:
+        # Start stderr filtering only when running as main CLI
+        stderr_filter.start()
 
-    genai.configure(api_key=gemini_key)
+        gemini_key = os.getenv("GOOGLE_API_KEY")
+        if not gemini_key:
+            console.print("[red]Error: GOOGLE_API_KEY not found in environment[/red]")
+            console.print(f"[yellow]Attempted to load .env from: {env_path}[/yellow]")
+            console.print(f"[yellow]File exists: {env_path.exists()}[/yellow]")
+            sys.exit(1)
 
-    await start_conversation()
+        genai.configure(api_key=gemini_key)
+
+        await start_conversation()
+    finally:
+        # Always restore terminal settings
+        if original_term_settings:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSANOW, original_term_settings)
+            except (OSError, termios.error):
+                pass
 
 
 if __name__ == "__main__":
+    # Save terminal settings at the very start
+    original_settings = None
+    try:
+        original_settings = termios.tcgetattr(sys.stdin)
+    except (OSError, termios.error):
+        pass
+
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
@@ -533,6 +564,16 @@ if __name__ == "__main__":
         # Exit silently on any other exception during shutdown
         pass
     finally:
+        # Restore terminal settings before any cleanup
+        if original_settings:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSANOW, original_settings)
+                # Also reset terminal to sane state
+                sys.stdout.write("\033[0m")  # Reset all attributes
+                sys.stdout.flush()
+            except (OSError, termios.error):
+                pass
+
         # Clean up stderr filter
         stderr_filter.stop()
 
