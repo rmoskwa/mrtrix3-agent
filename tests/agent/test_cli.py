@@ -231,7 +231,7 @@ class TestStartConversation:
 
         await start_conversation()
 
-        mock_agent.run.assert_called_once_with("Hello")
+        mock_agent.run.assert_called_once_with("Hello", message_history=[])
         assert mock_token_mgr.add_message.call_count == 2
         mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
@@ -376,7 +376,7 @@ class TestStartConversation:
 
         await start_conversation()
 
-        mock_agent.run.assert_called_once_with("Hello")
+        mock_agent.run.assert_called_once_with("Hello", message_history=[])
 
 
 @pytest.mark.asyncio

@@ -128,6 +128,7 @@ from src.agent.session_logger import (  # noqa: E402
     initialize_session_logger,
     cleanup_session_logger,
 )
+from src.agent.slash_commands import SlashCommandHandler  # noqa: E402
 
 # Set up logging - only show warnings and above by default
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
@@ -315,6 +316,10 @@ async def start_conversation():
 
     agent = MRtrixAssistant(dependencies=deps)
     token_manager = TokenManager()
+    slash_handler = SlashCommandHandler()
+
+    # Conversation history for maintaining context
+    conversation_history = []
 
     # Create a thread pool executor for input handling
     executor = ThreadPoolExecutor(max_workers=1)
@@ -329,21 +334,32 @@ async def start_conversation():
                 if not user_input.strip():
                     continue
 
-                if user_input.strip() == "/exit":
+                # Process potential slash commands
+                command_result = slash_handler.process_command(user_input)
+
+                # Handle command results
+                if command_result.exit_requested:
                     break
 
-                if not await token_manager.add_message(user_input):
+                if not command_result.continue_conversation:
+                    continue
+
+                # Use agent_input if provided by command, otherwise use original user_input
+                processing_input = command_result.agent_input or user_input
+
+                if not await token_manager.add_message(processing_input):
                     console.print(
                         "[yellow]Token limit reached. Starting new session.[/yellow]"
                     )
                     token_manager.reset()
-                    await token_manager.add_message(user_input)
+                    conversation_history = []  # Reset conversation history too
+                    await token_manager.add_message(processing_input)
 
                 # Token count is logged to file if logging is enabled
 
                 # Log the user's query using session logger
                 if session_logger:
-                    session_logger.log_user_query(user_input)
+                    session_logger.log_user_query(processing_input)
 
                 # Add blank line before spinner for better readability
                 console.print()
@@ -356,9 +372,14 @@ async def start_conversation():
                     transient=True,  # Remove spinner when done
                 ) as progress:
                     task = progress.add_task("[cyan]Thinking...", total=None)
-                    result = await agent.run(user_input)
+                    result = await agent.run(
+                        processing_input, message_history=conversation_history
+                    )
                     response_text = result.output
                     progress.update(task, completed=100)
+
+                # Update conversation history with new messages
+                conversation_history = result.all_messages()
 
                 await token_manager.add_message(response_text)
 

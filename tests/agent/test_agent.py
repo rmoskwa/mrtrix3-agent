@@ -65,7 +65,7 @@ class TestMRtrixAssistant:
             test_model = TestModel()
 
             with assistant.agent.override(model=test_model):
-                result = await assistant.run("What is MRtrix3?")
+                result = await assistant.run("What is MRtrix3?", message_history=[])
 
             assert result is not None
 
@@ -107,7 +107,9 @@ class TestMRtrixAssistant:
             )
 
             with assistant.agent.override(model=test_model):
-                result = await assistant.run("How do I install MRtrix3?")
+                result = await assistant.run(
+                    "How do I install MRtrix3?", message_history=[]
+                )
 
             assert result is not None
             assert "MRtrix3" in str(result)
@@ -146,7 +148,7 @@ class TestMRtrixAssistant:
             )
 
             with assistant.agent.override(model=test_model):
-                result = await assistant.run("Unknown topic xyz123")
+                result = await assistant.run("Unknown topic xyz123", message_history=[])
 
             assert result is not None
             result_str = str(result).lower()

@@ -25,7 +25,7 @@ jobs:
 
     - name: Run unit tests
       run: |
-        pytest tests/agent tests/knowledgeBase --cov=knowledge_base --cov-report=xml --cov-report=term
+        pytest tests/agent tests/knowledgeBase tests/monitoring tests/performance --cov=knowledge_base --cov-report=xml --cov-report=term
 
   # --- Stage 2: Integration tests (requires secrets) ---
   integration-tests:
@@ -53,3 +53,25 @@ jobs:
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+  # --- Stage 3: End-to-end tests ---
+  e2e-tests:
+    # Only run after both unit and integration tests succeed
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install -e ".[dev]"
+
+    - name: Run e2e tests
+      run: |
+        pytest tests/e2e --cov=knowledge_base --cov-report=xml --cov-report=term

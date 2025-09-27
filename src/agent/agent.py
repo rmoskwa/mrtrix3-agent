@@ -37,6 +37,10 @@ When discussing MRtrix3 commands, include usage examples and relevant parameters
             "google-gla:gemini-2.5-flash",
             system_prompt=self.system_prompt,
             deps_type=SearchKnowledgebaseDependencies,
+            model_settings={
+                "max_tokens": 65536,  # Gemini 2.5 Flash actual output limit
+                "temperature": 0.7,
+            },
         )
 
         self._register_tools()
@@ -45,15 +49,18 @@ When discussing MRtrix3 commands, include usage examples and relevant parameters
         """Register tools with the agent."""
         self.agent.tool(search_knowledgebase)
 
-    async def run(self, query: str):
+    async def run(self, query: str, message_history):
         """
         Run the agent with a user query.
 
         Args:
             query: Natural language query from the user.
+            message_history: Conversation history for context (required, can be empty list for new conversations).
 
         Returns:
             Agent response with relevant MRtrix3 documentation.
         """
-        result = await self.agent.run(query, deps=self.dependencies)
+        result = await self.agent.run(
+            query, deps=self.dependencies, message_history=message_history
+        )
         return result
