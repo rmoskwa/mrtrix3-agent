@@ -273,61 +273,19 @@ class TestSharefileScriptIntegration:
 
     def test_sharefile_handles_nonexistent_file(self):
         """Test sharefile handles nonexistent files gracefully."""
-        with patch("shutil.which", return_value="/usr/bin/mrinfo"):
-            result = subprocess.run(
-                [
-                    "/usr/bin/python3",
-                    str(self.script_path),
-                    "/absolutely/nonexistent/path.nii",
-                    "test query",
-                ],
-                capture_output=True,
-                text=True,
-            )
-
-            assert result.returncode == 1
-            assert "does not exist" in result.stdout
-
-    def test_sharefile_successful_execution(self):
-        """Test successful execution of sharefile with real file."""
-        # Create a temporary test file
-        test_file = self.test_files_dir / "test.nii"
-        test_file.write_text("fake nii file")
-
-        # This test will only work if mrinfo is installed
-        # If not, the test will fail with appropriate error
         result = subprocess.run(
             [
                 "/usr/bin/python3",
                 str(self.script_path),
-                str(test_file),
-                "How to process this file?",
+                "/absolutely/nonexistent/path.nii",
+                "test query",
             ],
             capture_output=True,
             text=True,
         )
 
-        # If mrinfo is not installed, we expect an error
-        if "mrinfo' is not found" in result.stdout:
-            pytest.skip("mrinfo not installed, skipping integration test")
-
-        # If mrinfo is installed but can't read our fake file, that's expected
-        if result.returncode != 0:
-            # Should have error about invalid format (since we created a fake file)
-            assert "error" in result.stdout.lower() or "error" in result.stderr.lower()
-        else:
-            # If somehow it succeeded, check for expected output format
-            assert "<user file information>" in result.stdout
-            assert "<user_provided_filepath>" in result.stdout
-            assert str(test_file) in result.stdout
-            assert "How to process this file?" in result.stdout
-
-    def test_sharefile_mrinfo_timeout(self):
-        """Test sharefile handles mrinfo timeout."""
-        # This test would need to actually simulate a timeout which is complex
-        # For integration testing, we'll skip this test as it requires
-        # modifying the actual sharefile script or using complex mocking
-        pytest.skip("Timeout testing requires complex setup - covered by unit tests")
+        assert result.returncode == 1
+        assert "does not exist" in result.stdout
 
     def test_build_prompt_function(self):
         """Test the build_prompt function directly."""

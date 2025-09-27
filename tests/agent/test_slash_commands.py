@@ -162,7 +162,7 @@ class TestShareFileCommand:
         """Test /sharefile when sharefile.py returns an error."""
         mock_result = MagicMock()
         mock_result.returncode = 1
-        mock_result.stdout = "Error: mrinfo failed"
+        mock_result.stdout = "Error: File processing failed"
 
         with patch("subprocess.run", return_value=mock_result):
             with patch("src.agent.slash_commands.console") as mock_console:
@@ -172,7 +172,9 @@ class TestShareFileCommand:
 
                 assert result.success is False
                 assert result.continue_conversation is False
-                mock_console.print.assert_called_with("[red]Error: mrinfo failed[/red]")
+                mock_console.print.assert_called_with(
+                    "[red]Error: File processing failed[/red]"
+                )
 
     def test_sharefile_timeout(self):
         """Test /sharefile timeout handling."""
@@ -595,7 +597,7 @@ class TestSlashCommandEdgeCases:
                     result = self.handler.process_command(
                         f"/sharefile {path} test query"
                     )
-                    # Should pass path through to subprocess - let mrinfo handle validation
+                    # Should pass path through to subprocess for validation
                     assert result.success is True
 
     def test_unicode_and_encoding_handling(self):
