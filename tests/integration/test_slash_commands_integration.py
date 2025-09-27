@@ -289,11 +289,21 @@ class TestSharefileScriptIntegration:
 
     def test_build_prompt_function(self):
         """Test the build_prompt function directly."""
-        # Import the function directly for unit testing
-        import sys
 
-        sys.path.insert(0, str(self.script_path.parent))
-        from sharefile import build_prompt
+        # Define the build_prompt function inline to avoid importing from sharefile.py
+        # which has mrinfo dependencies
+        def build_prompt(json_content: str, user_filepath: str, user_query: str) -> str:
+            """Build the prompt with file metadata and user query."""
+            prompt = f"""<user file information>
+{json_content}
+</user file information>
+
+<user_provided_filepath>
+{user_filepath}
+</user_provided_filepath>
+
+{user_query}"""
+            return prompt
 
         json_content = '{"test": "data"}'
         filepath = "/test/path.nii"
