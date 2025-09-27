@@ -113,10 +113,13 @@ stderr_filter = StderrFilter()
 
 # Now safe to import other modules that may use environment variables
 import google.generativeai as genai  # noqa: E402
-from rich.console import Console  # noqa: E402
-from rich.markdown import Markdown  # noqa: E402
+from rich.console import Console, ConsoleOptions, RenderResult  # noqa: E402
+from rich.markdown import Markdown, CodeBlock  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 from rich.panel import Panel  # noqa: E402
+from rich.syntax import Syntax  # noqa: E402
+from rich.text import Text  # noqa: E402
+from pyfiglet import figlet_format  # noqa: E402
 
 from src.agent.agent import MRtrixAssistant  # noqa: E402
 from src.agent.async_dependencies import create_async_dependencies  # noqa: E402
@@ -150,6 +153,65 @@ logging.getLogger("chromadb.config").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message="ALTS creds ignored")
 
 console = Console()
+
+
+def prettier_code_blocks():
+    """Make rich code blocks prettier and easier to copy."""
+
+    class SimpleCodeBlock(CodeBlock):
+        def __rich_console__(
+            self, console: Console, options: ConsoleOptions
+        ) -> RenderResult:
+            code = str(self.text).rstrip()
+            width = options.max_width if options.max_width else 80
+
+            # Create dynamic border based on console width
+            border_width = min(width - len(self.lexer_name) - 4, 60)
+
+            # Top border with language label
+            yield Text(
+                f"╭─[ {self.lexer_name} ]" + "─" * border_width, style="bright_black"
+            )
+
+            # Create syntax with highlighting
+            syntax = Syntax(
+                code,
+                self.lexer_name,
+                theme="None",
+                background_color="#0d1117",  # GitHub-style dark background
+                word_wrap=True,
+                line_numbers=False,
+                indent_guides=False,
+                code_width=width,
+            )
+
+            # Render the syntax and apply bold to the entire output
+            from rich.style import Style
+            from rich.segment import Segment
+
+            bold_style = Style(bold=True)
+
+            # Render the syntax and apply bold to each segment
+            for segment in console.render(syntax, options):
+                # Apply bold to each segment
+                if segment.text:
+                    # Create a new segment with bold style
+                    new_style = (segment.style or Style()) + bold_style
+                    yield Segment(segment.text, new_style)
+                else:
+                    yield segment
+
+            # Bottom border
+            yield Text(
+                "╰" + "─" * (border_width + len(self.lexer_name) + 5),
+                style="bright_black",
+            )
+
+    Markdown.elements["fence"] = SimpleCodeBlock
+
+
+# Apply prettier code blocks on module load
+prettier_code_blocks()
 
 
 async def get_user_input(loop, executor) -> str:
@@ -301,14 +363,18 @@ async def start_conversation():
         if local_manager:
             local_manager.lock_manager.release_lock()
 
-    # Display MRtrixBot with border only (no fill)
+    # Display MRtrixBot with ASCII art for larger text
     console.print()
+    # Create ASCII art text with a smaller font for better fit
+    ascii_text = figlet_format("MRtrixBot", font="big")
+    # Remove trailing newline if present
+    ascii_text = ascii_text.rstrip()
     panel = Panel(
-        "[bold red]MRtrixBot[/bold red]",
-        style="bold red",
+        f"[bold blue]{ascii_text}[/bold blue]",
+        style="bold blue",
         border_style="red",
         expand=False,
-        padding=(2, 8),
+        padding=(1, 2),
     )
     console.print(panel, justify="center")
     console.print()
