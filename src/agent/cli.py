@@ -243,9 +243,12 @@ async def get_user_input(loop, executor) -> str:
     console.print("[bright_green]▶ [/bright_green]", end="")
     sys.stdout.flush()  # Ensure prompt is visible before input
 
-    user_input = await loop.run_in_executor(executor, input)
-
-    return user_input
+    try:
+        user_input = await loop.run_in_executor(executor, input)
+        return user_input
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # Handle interruption gracefully
+        raise KeyboardInterrupt()
 
 
 class TokenManager:
@@ -623,7 +626,7 @@ async def start_conversation():
 
             except (KeyboardInterrupt, EOFError):
                 print()  # Print newline for clean exit
-                break
+                break  # Exit the loop cleanly
 
             except Exception as e:
                 # Get user-friendly message
@@ -703,10 +706,13 @@ def run():
 
     try:
         asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        # Exit silently on Ctrl+C or system exit
+    except KeyboardInterrupt:
+        # Exit cleanly on Ctrl+C
         print()  # Print newline for clean terminal prompt
-        pass
+        os_module._exit(0)  # Use os._exit for immediate termination
+    except SystemExit:
+        # Let SystemExit propagate normally
+        raise
     except Exception:
         # Exit silently on any other exception during shutdown
         pass

@@ -49,7 +49,19 @@ def validate_environment() -> dict:
         load_dotenv(config_file, override=False)
 
     # Load from .env for development (lower priority)
-    load_dotenv(override=False)
+    # Try multiple locations for .env file
+    possible_env_paths = [
+        Path.cwd() / ".env",  # Current directory
+        Path(__file__).parent.parent.parent / ".env",  # Project root
+    ]
+
+    for env_path in possible_env_paths:
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
+            break
+    else:
+        # Fallback to default load_dotenv behavior
+        load_dotenv(override=False)
 
     env_vars = {}
 
@@ -167,6 +179,7 @@ def setup_search_knowledgebase_dependencies() -> SearchKnowledgebaseDependencies
     deps = SearchKnowledgebaseDependencies(
         supabase_client=supabase_client,
         embedding_model=env_vars["EMBEDDING_MODEL"],  # Pass as string
+        embedding_api_key=env_vars["GOOGLE_API_KEY_EMBEDDING"],  # Pass API key
         rate_limiter=rate_limiter,
     )
 

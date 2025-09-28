@@ -14,19 +14,20 @@ logger = logging.getLogger("agent.embedding")
 class EmbeddingService:
     """Service for generating embeddings using Google Gemini API."""
 
-    def __init__(self, model_name: str = None):
+    def __init__(self, model_name: str = None, api_key: str = None):
         """
         Initialize embedding service.
 
         Args:
             model_name: Gemini embedding model name. Defaults to EMBEDDING_MODEL env var.
+            api_key: Google API key for embeddings. Defaults to GOOGLE_API_KEY_EMBEDDING env var.
         """
         self.model_name = model_name or os.getenv("EMBEDDING_MODEL")
         if not self.model_name:
             raise ValueError(
                 "EMBEDDING_MODEL not found in environment and no model_name provided"
             )
-        api_key = os.getenv("GOOGLE_API_KEY_EMBEDDING")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY_EMBEDDING")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY_EMBEDDING not found in environment")
 

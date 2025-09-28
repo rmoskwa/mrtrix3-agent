@@ -82,7 +82,10 @@ async def search_knowledgebase(
             if hasattr(ctx.deps, "embedding_service") and ctx.deps.embedding_service:
                 embedding_service = ctx.deps.embedding_service
             else:
-                embedding_service = EmbeddingService(ctx.deps.embedding_model)
+                embedding_service = EmbeddingService(
+                    ctx.deps.embedding_model,
+                    api_key=getattr(ctx.deps, "embedding_api_key", None),
+                )
             embedding = await embedding_service.generate_embedding(sanitized_query)
         except (TimeoutError, ConnectionError) as e:
             logger.warning(

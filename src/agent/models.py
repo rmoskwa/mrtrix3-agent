@@ -81,6 +81,9 @@ class SearchKnowledgebaseDependencies(BaseDependencies):
         default_factory=lambda: os.getenv("EMBEDDING_MODEL"),
         description="Google generative AI embedding model name",
     )
+    embedding_api_key: Optional[str] = Field(
+        default=None, description="Google API key for embeddings"
+    )
     embedding_service: Optional[EmbeddingService] = Field(
         default=None, description="Cached embedding service instance"
     )
