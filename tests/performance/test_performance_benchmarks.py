@@ -7,10 +7,15 @@ of critical components.
 
 import asyncio
 import gc
+import sys
 import time
+from pathlib import Path
 
 import psutil
 import pytest
+
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from src.agent.cache import CacheManager, TTLCache
 from src.agent.rate_limiter import RateLimiter

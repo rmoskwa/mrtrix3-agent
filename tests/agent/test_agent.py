@@ -161,65 +161,58 @@ class TestEnvironmentValidation:
     def test_validate_environment_success(self):
         """Test successful environment validation."""
         env_vars = {
-            "SUPABASE_URL": "https://test.supabase.co",
-            "SUPABASE_KEY": "test_key",
             "GOOGLE_API_KEY": "google_key",
-            "GOOGLE_API_KEY_EMBEDDING": "google_key",
-            "EMBEDDING_MODEL": "gemini-embedding-001",
-            "EMBEDDING_DIMENSIONS": "768",
+            "GOOGLE_API_KEY_EMBEDDING": "google_key_embed",
         }
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            result = validate_environment()
+        with patch("src.agent.dependencies.load_dotenv"):
+            with patch.dict(os.environ, env_vars, clear=True):
+                result = validate_environment()
 
-        assert result["SUPABASE_URL"] == "https://test.supabase.co"
-        assert result["SUPABASE_KEY"] == "test_key"
+        # Supabase credentials are now hardcoded
+        assert result["SUPABASE_URL"].startswith("https://")
+        assert result["SUPABASE_URL"].endswith(".supabase.co")
+        assert result["SUPABASE_KEY"] is not None
         assert result["GOOGLE_API_KEY"] == "google_key"
-        assert result["GOOGLE_API_KEY_EMBEDDING"] == "google_key"
+        assert result["GOOGLE_API_KEY_EMBEDDING"] == "google_key_embed"
+        # Embedding config is hardcoded
         assert result["EMBEDDING_MODEL"] == "gemini-embedding-001"
         assert result["EMBEDDING_DIMENSIONS"] == 768
 
     def test_validate_environment_missing_required(self):
         """Test validation fails when required variables are missing."""
-        env_vars = {
-            "SUPABASE_URL": "https://test.supabase.co",
-            "GOOGLE_API_KEY": "google_key",
-            "GOOGLE_API_KEY_EMBEDDING": "google_key",
-            "EMBEDDING_MODEL": "gemini-embedding-001",
-            "EMBEDDING_DIMENSIONS": "768",
-        }
-
-        with patch.dict(os.environ, env_vars, clear=False):
-            with patch.dict(os.environ, {"SUPABASE_KEY": ""}, clear=False):
-                with pytest.raises(ValueError, match="SUPABASE_KEY is not set"):
+        # Clear all environment variables to ensure GOOGLE_API_KEY is missing
+        with patch("src.agent.dependencies.load_dotenv"):
+            with patch.dict(os.environ, {}, clear=True):
+                with pytest.raises(
+                    ValueError, match="Required API key GOOGLE_API_KEY is not set"
+                ):
                     validate_environment()
 
-    def test_validate_environment_wrong_embedding_model(self):
-        """Test validation fails with wrong embedding model."""
+    def test_validate_environment_uses_hardcoded_embedding_model(self):
+        """Test that validation always uses hardcoded embedding model."""
         env_vars = {
-            "SUPABASE_URL": "https://test.supabase.co",
-            "SUPABASE_KEY": "test_key",
             "GOOGLE_API_KEY": "google_key",
-            "GOOGLE_API_KEY_EMBEDDING": "google_key",
-            "EMBEDDING_MODEL": "wrong-model",
-            "EMBEDDING_DIMENSIONS": "768",
+            "EMBEDDING_MODEL": "wrong-model",  # This should be ignored
+            "EMBEDDING_DIMENSIONS": "512",  # This should be ignored
         }
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            with pytest.raises(ValueError, match="EMBEDDING_MODEL must be"):
-                validate_environment()
+        with patch("src.agent.dependencies.load_dotenv"):
+            with patch.dict(os.environ, env_vars, clear=True):
+                result = validate_environment()
+                # Should use hardcoded values regardless of env
+                assert result["EMBEDDING_MODEL"] == "gemini-embedding-001"
+                assert result["EMBEDDING_DIMENSIONS"] == 768
 
-    def test_validate_environment_wrong_dimensions(self):
-        """Test validation fails with wrong embedding dimensions."""
+    def test_validate_environment_default_embedding_key(self):
+        """Test that GOOGLE_API_KEY_EMBEDDING defaults to GOOGLE_API_KEY."""
         env_vars = {
-            "SUPABASE_URL": "https://test.supabase.co",
-            "SUPABASE_KEY": "test_key",
             "GOOGLE_API_KEY": "google_key",
-            "GOOGLE_API_KEY_EMBEDDING": "google_key",
-            "EMBEDDING_MODEL": "gemini-embedding-001",
-            "EMBEDDING_DIMENSIONS": "512",
+            # Not providing GOOGLE_API_KEY_EMBEDDING
         }
 
-        with patch.dict(os.environ, env_vars, clear=True):
-            with pytest.raises(ValueError, match="EMBEDDING_DIMENSIONS must be"):
-                validate_environment()
+        with patch("src.agent.dependencies.load_dotenv"):
+            with patch.dict(os.environ, env_vars, clear=True):
+                result = validate_environment()
+                # Should default to GOOGLE_API_KEY
+                assert result["GOOGLE_API_KEY_EMBEDDING"] == "google_key"

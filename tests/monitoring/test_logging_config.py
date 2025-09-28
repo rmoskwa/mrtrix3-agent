@@ -7,8 +7,11 @@ import logging
 import os
 import sys
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from monitoring.logging_config import (
     StructuredFormatter,

@@ -3,8 +3,12 @@ Tests for monitoring module initialization.
 """
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
+
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 
 def test_monitoring_module_can_be_imported_when_disabled():
