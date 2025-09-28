@@ -320,10 +320,9 @@ async def start_conversation():
     session_logger = initialize_session_logger(collect_logs=collect_logs)
 
     if collect_logs:
-        # Set appropriate logging levels for collection
-        logging.getLogger().setLevel(logging.DEBUG)
-        logging.getLogger("agent.cli").setLevel(logging.INFO)
-        logging.getLogger("agent.tools").setLevel(logging.INFO)
+        # Don't set root logger level here - let session logger handle it
+        # This prevents debug messages from appearing in the console
+        pass
 
     # Start without title - MRtrixBot will be shown after sync
 
@@ -454,10 +453,11 @@ async def start_conversation():
                 if session_logger:
                     session_logger.log_user_query(processing_input)
 
-                # Add blank line before spinner for better readability
-                console.print()
+                # Run the agent - use non-streaming for reliability
+                console.print("\n[bold red]Assistant:[/bold red]")
+                console.print("[bold red]----------[/bold red]")
 
-                # Run the agent with a spinner - ALTS warnings are suppressed by our stderr wrapper
+                # Show a spinner while the agent is thinking
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
@@ -465,25 +465,161 @@ async def start_conversation():
                     transient=True,  # Remove spinner when done
                 ) as progress:
                     task = progress.add_task("[cyan]Thinking...", total=None)
+
+                    # Run the agent
                     result = await agent.run(
                         processing_input, message_history=conversation_history
                     )
-                    response_text = result.output
+
+                    # Update spinner to show we're processing the response
+                    if result.all_messages() and len(result.all_messages()) > 4:
+                        # Multiple tool calls were made
+                        progress.update(
+                            task, description="[cyan]Organizing search results..."
+                        )
+                    else:
+                        progress.update(
+                            task, description="[cyan]Finalizing response..."
+                        )
+
+                    # Mark task as complete
                     progress.update(task, completed=100)
 
-                # Update conversation history with new messages
+                # Get the complete response - check multiple sources
+                full_response = ""
+
+                # First try result.output (may be incomplete with multiple tool calls)
+                if result.output:
+                    full_response = result.output
+                    logger.debug(
+                        f"Got response from result.output: {len(full_response)} chars"
+                    )
+
+                # Also check the message history for the actual response
+                # PydanticAI often splits the response across multiple TextParts in messages
+                # We need to reconstruct the complete response from all parts
+                all_text_parts = []
+                assistant_message_parts = []
+
+                if result.all_messages():
+                    logger.debug(
+                        f"Checking {len(result.all_messages())} messages for complete response..."
+                    )
+
+                    # Collect all text parts from the last assistant message(s)
+                    for idx, msg in enumerate(result.all_messages()):
+                        msg_parts = []
+                        if hasattr(msg, "parts"):
+                            for part in msg.parts:
+                                part_type = (
+                                    part.__class__.__name__
+                                    if hasattr(part, "__class__")
+                                    else ""
+                                )
+                                if part_type == "TextPart" and hasattr(part, "content"):
+                                    if part.content and len(part.content.strip()) > 10:
+                                        msg_parts.append(part.content)
+                                        all_text_parts.append(part.content)
+                                        logger.debug(
+                                            f"Message {idx} TextPart: {len(part.content)} chars"
+                                        )
+
+                        # If this message had text parts, it's likely an assistant response
+                        if msg_parts:
+                            assistant_message_parts.append((idx, msg_parts))
+
+                # Try to reconstruct the complete response
+                if assistant_message_parts:
+                    # Check if we have response parts spread across multiple messages
+                    # This happens when the agent makes multiple tool calls
+                    if len(assistant_message_parts) > 1:
+                        logger.debug(
+                            f"Found response parts across {len(assistant_message_parts)} messages"
+                        )
+
+                        # Combine ALL assistant message parts in order
+                        all_parts_combined = []
+                        for msg_idx, parts in assistant_message_parts:
+                            all_parts_combined.extend(parts)
+
+                        # Join all parts with proper spacing
+                        complete_response = "\n".join(all_parts_combined)
+                        logger.debug(
+                            f"Reconstructed response from {len(all_parts_combined)} total parts: {len(complete_response)} chars"
+                        )
+
+                        # Always use the reconstructed response when fragmented
+                        # (PydanticAI's result.output is unreliable with multiple tool calls)
+                        logger.debug(
+                            "Using fully reconstructed response (fragmented across messages)"
+                        )
+                        full_response = complete_response
+
+                    else:
+                        # Single message with multiple parts
+                        last_assistant_idx, last_assistant_parts = (
+                            assistant_message_parts[-1]
+                        )
+                        if len(last_assistant_parts) > 1:
+                            logger.debug(
+                                f"Found multi-part response in single message {last_assistant_idx}"
+                            )
+                            reconstructed = "\n".join(last_assistant_parts)
+                            # Use reconstructed version for multi-part single messages
+                            full_response = reconstructed
+
+                # Now display the complete response
+                # We have the full response, so we can render it properly with Markdown
+                if full_response:
+                    # Check if response is very long and might cause display issues
+                    if len(full_response) > 5000:
+                        # Split into chunks for very long responses
+                        lines = full_response.split("\n")
+                        current_chunk = ""
+                        chunks = []
+
+                        for line in lines:
+                            if (
+                                len(current_chunk) + len(line) + 1 > 4000
+                            ):  # Keep chunks under 4000 chars
+                                if current_chunk:
+                                    chunks.append(current_chunk)
+                                current_chunk = line
+                            else:
+                                current_chunk = (
+                                    current_chunk + "\n" + line
+                                    if current_chunk
+                                    else line
+                                )
+
+                        if current_chunk:
+                            chunks.append(current_chunk)
+
+                        # Render each chunk with Markdown
+                        for chunk in chunks:
+                            console.print(Markdown(chunk))
+                    else:
+                        # Normal length - render with Markdown formatting
+                        console.print(Markdown(full_response))
+
+                # Update conversation history
                 conversation_history = result.all_messages()
 
-                await token_manager.add_message(response_text)
+                # Add newline after response
+                console.print()
+
+                # Log the complete response
+                logger.debug(f"Response length: {len(full_response)} characters")
+                if full_response and len(full_response) > 1000:
+                    logger.debug(
+                        f"Response preview (last 200 chars): ...{full_response[-200:]}"
+                    )
+
+                await token_manager.add_message(full_response)
 
                 # Log Gemini's response using session logger
                 if session_logger:
-                    session_logger.log_gemini_response(response_text)
-
-                console.print("\n[bold red]Assistant:[/bold red]")
-                console.print("[bold red]----------[/bold red]")
-                console.print(Markdown(response_text))
-                console.print()
+                    session_logger.log_gemini_response(full_response)
 
             except (KeyboardInterrupt, EOFError):
                 print()

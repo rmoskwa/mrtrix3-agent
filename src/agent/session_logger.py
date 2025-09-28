@@ -72,7 +72,12 @@ class SessionLogger:
         self.file_handler.setFormatter(logging.Formatter("%(message)s"))
 
         # Configure loggers to use file handler
-        for logger_name in ["agent.cli", "agent.tools", "agent.embedding"]:
+        for logger_name in [
+            "agent.cli",
+            "agent.tools",
+            "agent.embedding",
+            "agent.agent",
+        ]:
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.DEBUG)
             logger.addHandler(self.file_handler)
@@ -91,7 +96,12 @@ class SessionLogger:
         """Clean up logging resources."""
         # Remove file handler from loggers
         if self.file_handler:
-            for logger_name in ["agent.cli", "agent.tools", "agent.embedding"]:
+            for logger_name in [
+                "agent.cli",
+                "agent.tools",
+                "agent.embedding",
+                "agent.agent",
+            ]:
                 logger = logging.getLogger(logger_name)
                 logger.removeHandler(self.file_handler)
             self.file_handler.flush()
@@ -157,17 +167,16 @@ class SessionLogger:
         """Log Gemini's response.
 
         Args:
-            response: The response text (first 500 chars will be logged)
+            response: The response text (full response will be logged)
         """
         if self.enabled:
             logger = logging.getLogger("agent.cli")
             logger.info("\n" + "=" * 60)
             logger.info("🤖 GEMINI RESPONSE:")
             logger.info("=" * 60)
-            preview = response[:500]
-            if len(response) > 500:
-                preview += "..."
-            logger.info(preview)
+            logger.info(f"[Response length: {len(response)} characters]")
+            # Log the full response for debugging
+            logger.info(response)
             logger.info("=" * 60 + "\n")
 
 

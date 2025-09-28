@@ -222,6 +222,7 @@ class TestStartConversation:
         mock_agent = AsyncMock()
         mock_result = Mock()
         mock_result.output = "Hello! I'm the MRtrix3 Assistant."
+        mock_result.all_messages.return_value = []  # Add the all_messages method
         mock_agent.run.return_value = mock_result
         MockAssistant.return_value = mock_agent
 
@@ -268,6 +269,7 @@ class TestStartConversation:
         mock_agent = AsyncMock()
         mock_result = Mock()
         mock_result.output = "Response"
+        mock_result.all_messages.return_value = []  # Add the all_messages method
         mock_agent.run.return_value = mock_result
         MockAssistant.return_value = mock_agent
 
@@ -367,6 +369,7 @@ class TestStartConversation:
         mock_agent = AsyncMock()
         mock_result = Mock()
         mock_result.output = "Response"
+        mock_result.all_messages.return_value = []  # Add the all_messages method
         mock_agent.run.return_value = mock_result
         MockAssistant.return_value = mock_agent
 
@@ -416,6 +419,7 @@ class TestEnvironmentVariables:
         mock_agent = AsyncMock()
         mock_result = Mock()
         mock_result.output = "Response"
+        mock_result.all_messages.return_value = []  # Add the all_messages method
         mock_agent.run.return_value = mock_result
         MockAssistant.return_value = mock_agent
 

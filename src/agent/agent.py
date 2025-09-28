@@ -1,9 +1,12 @@
 """MRtrix3 Assistant agent implementation using PydanticAI framework."""
 
+import logging
 from pydantic_ai import Agent
 
 from .models import SearchKnowledgebaseDependencies
 from .tools import search_knowledgebase
+
+logger = logging.getLogger(__name__)
 
 
 class MRtrixAssistant:
@@ -60,7 +63,13 @@ When discussing MRtrix3 commands, include usage examples and relevant parameters
         Returns:
             Agent response with relevant MRtrix3 documentation.
         """
+        logger.debug(f"Agent.run called with query: {query[:100]}...")
         result = await self.agent.run(
             query, deps=self.dependencies, message_history=message_history
         )
+
+        # Log result info for debugging if needed
+        if result.output:
+            logger.debug(f"Raw agent result.output length: {len(result.output)} chars")
+
         return result
