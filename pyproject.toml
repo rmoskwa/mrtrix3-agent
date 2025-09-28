@@ -43,14 +43,14 @@ dev = [
 ]
 
 [project.scripts]
-mrtrixBot = "agent.cli:run"
-mrtrixBot-setup = "agent.setup_config:setup_config"
+mrtrixBot = "src.agent.cli:run"
+mrtrixBot-setup = "src.agent.setup_config:setup_config"
 
 [tool.setuptools]
-packages = ["agent"]
+packages = ["src.agent", "src.knowledge_base", "src.workflows"]
 
-[tool.setuptools.package-dir]
-"agent" = "src/agent"
+[tool.setuptools.package-data]
+"*" = ["*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
