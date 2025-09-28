@@ -6,8 +6,12 @@ focusing on verifying that all commands from commands_list.rst have correspondin
 .rst files in the commands/ directory after sparse checkout.
 """
 
-import pytest
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+import pytest
 from unittest.mock import patch, MagicMock, call
 import subprocess
 from typing import List
