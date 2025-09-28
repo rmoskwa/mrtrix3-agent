@@ -234,7 +234,7 @@ class TestConversationFlowEndToEnd:
             patch("asyncio.get_event_loop") as mock_get_loop,
             patch("src.agent.cli.console"),
             patch("src.agent.slash_commands.console"),
-            patch("subprocess.run") as mock_subprocess,
+            patch("subprocess.run") as mock_subprocess_global,
             patch.dict(os.environ, {"COLLECT_LOGS": "false"}),
         ):
             mock_deps = AsyncMock()
@@ -254,21 +254,50 @@ class TestConversationFlowEndToEnd:
             ]
             mock_loop.run_in_executor.side_effect = conversation_inputs
 
+            # Track only sharefile calls, not system calls
+            sharefile_call_count = 0
+
             # Mock different /sharefile outputs for different files
             def mock_subprocess_side_effect(*args, **kwargs):
+                nonlocal sharefile_call_count
                 command_args = args[0]
-                if "/data/anatomical.nii" in command_args:
+
+                # Convert to string if it's a list
+                command_str = (
+                    " ".join(command_args)
+                    if isinstance(command_args, list)
+                    else str(command_args)
+                )
+
+                # Ignore lsb_release and other system calls
+                if "lsb_release" in command_str or "uname" in command_str:
+                    result = Mock()
+                    result.returncode = 0
+                    result.stdout = "Ubuntu 20.04"  # Mock system info
+                    return result
+
+                # Count sharefile calls
+                if "sharefile" in command_str:
+                    sharefile_call_count += 1
+
+                if "/data/anatomical.nii" in command_str:
                     result = Mock()
                     result.returncode = 0
                     result.stdout = '<user file information>\n{"format": "NIfTI", "type": "T1"}\n</user file information>\n<user_provided_filepath>\n/data/anatomical.nii\n</user_provided_filepath>\nThis is a T1-weighted image, how should I segment it?'
                     return result
-                elif "/data/dwi.nii" in command_args:
+                elif "/data/dwi.nii" in command_str:
                     result = Mock()
                     result.returncode = 0
                     result.stdout = '<user file information>\n{"format": "NIfTI", "type": "DWI"}\n</user file information>\n<user_provided_filepath>\n/data/dwi.nii\n</user_provided_filepath>\nHow should I process this DWI data for tractography?'
                     return result
+                else:
+                    # Default fallback to prevent None returns
+                    result = Mock()
+                    result.returncode = 1
+                    result.stdout = "Error: Unexpected file path"
+                    return result
 
-            mock_subprocess.side_effect = mock_subprocess_side_effect
+            mock_subprocess_global.side_effect = mock_subprocess_side_effect
 
             with (
                 patch("src.agent.cli.MRtrixAssistant") as MockAssistant,
@@ -421,17 +450,29 @@ class TestConversationFlowEndToEnd:
                     ),
                 ]
 
-                mock_agent.run.side_effect = responses
+                # Add extra responses in case of unexpected calls (for debugging)
+                extra_response = Mock(
+                    output="Unexpected call - this shouldn't happen",
+                    all_messages=lambda: [],
+                )
+                mock_agent.run.side_effect = responses + [
+                    extra_response,
+                    extra_response,
+                ]
                 MockAssistant.return_value = mock_agent
                 MockTokenManager.return_value = mock_token_mgr
 
                 await start_conversation()
 
                 # Verify 4 agent calls total
-                assert mock_agent.run.call_count == 4
+                assert (
+                    mock_agent.run.call_count == 4
+                ), f"Expected 4 agent calls, got {mock_agent.run.call_count}"
 
-                # Verify subprocess was called twice for different files
-                assert mock_subprocess.call_count == 2
+                # Verify subprocess was called twice for sharefile commands (ignoring system calls)
+                assert (
+                    sharefile_call_count == 2
+                ), f"Expected 2 sharefile subprocess calls, got {sharefile_call_count}"
 
                 calls = mock_agent.run.call_args_list
 
