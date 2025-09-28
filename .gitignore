@@ -5,6 +5,8 @@
 # Python
 __pycache__/
 *.egg-info/
+*.pyc
+*.pyo
 
 # Testing
 .pytest_cache/
@@ -24,3 +26,11 @@ docsInternal/
 CLAUDE.md
 benchmark_results/
 metrics/
+
+# PyPI distribution
+dist/
+build/
+*.whl
+
+# User configuration (created by mrtrixBot-setup)
+# Note: .env is already ignored above for development

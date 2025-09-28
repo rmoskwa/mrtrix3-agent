@@ -110,13 +110,10 @@ async def create_async_dependencies() -> AsyncSearchKnowledgebaseDependencies:
     Raises:
         ConnectionError: After 3 failed attempts to connect to Supabase
     """
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    from .config import SUPABASE_URL, SUPABASE_ANON_KEY
 
-    if not url:
-        raise ValueError("SUPABASE_URL not found in environment")
-    if not key:
-        raise ValueError("SUPABASE_KEY not found in environment")
+    url = SUPABASE_URL
+    key = SUPABASE_ANON_KEY
 
     try:
         # Create async Supabase client with retry
@@ -125,12 +122,14 @@ async def create_async_dependencies() -> AsyncSearchKnowledgebaseDependencies:
         logger.error(f"Failed to create Supabase client: {e}")
         raise ConnectionError(f"Failed to connect to Supabase: {e}") from e
 
-    embedding_model = os.getenv("EMBEDDING_MODEL")
-    if not embedding_model:
-        raise ValueError("EMBEDDING_MODEL not found in environment")
+    from .config import EMBEDDING_MODEL, APP_NAME
+    from platformdirs import user_data_dir
+
+    embedding_model = EMBEDDING_MODEL
 
     # Set up ChromaDB for local operations
-    chromadb_path = os.getenv("CHROMADB_PATH", "~/.mrtrix3-agent/chromadb")
+    default_chromadb_path = Path(user_data_dir(APP_NAME)) / "chromadb"
+    chromadb_path = os.getenv("CHROMADB_PATH", str(default_chromadb_path))
     chromadb_path = os.path.expanduser(chromadb_path)
 
     try:

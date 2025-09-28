@@ -12,6 +12,14 @@ license = {text = "MIT"}
 authors = [
     {name = "Robert Moskwa", email = "rmoskwa@wisc.edu"},
 ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 
 dependencies = [
     "supabase>=2.0.0",
@@ -24,6 +32,7 @@ dependencies = [
     "chromadb>=1.0.0",
     "psutil>=5.9.0",
     "pyfiglet>=1.0.0",
+    "platformdirs>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -33,13 +42,15 @@ dev = [
     "pytest-cov>=4.1.0",  # For coverage reports
 ]
 
+[project.scripts]
+mrtrixBot = "src.agent.cli:run"
+mrtrixBot-setup = "src.agent.setup_config:setup_config"
+
 [tool.setuptools]
-packages = ["agent", "knowledge_base", "monitoring"]
+packages = ["agent"]
 
 [tool.setuptools.package-dir]
 "agent" = "src/agent"
-"knowledge_base" = "src/knowledge_base"
-"monitoring" = "monitoring"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

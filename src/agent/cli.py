@@ -622,7 +622,7 @@ async def start_conversation():
                     session_logger.log_gemini_response(full_response)
 
             except (KeyboardInterrupt, EOFError):
-                print()
+                print()  # Print newline for clean exit
                 break
 
             except Exception as e:
@@ -653,6 +653,14 @@ async def start_conversation():
 
 async def main():
     """Entry point for CLI application."""
+    # Validate setup before starting
+    from .validate_setup import check_setup
+
+    success, message = check_setup()
+    if not success:
+        console.print(f"[red]❌ Setup Error:[/red] {message}")
+        sys.exit(1)
+
     # Save original terminal settings
     original_term_settings = None
     try:
@@ -666,9 +674,10 @@ async def main():
 
         gemini_key = os.getenv("GOOGLE_API_KEY")
         if not gemini_key:
-            console.print("[red]Error: GOOGLE_API_KEY not found in environment[/red]")
-            console.print(f"[yellow]Attempted to load .env from: {env_path}[/yellow]")
-            console.print(f"[yellow]File exists: {env_path.exists()}[/yellow]")
+            console.print("[red]❌ Error: GOOGLE_API_KEY not found[/red]")
+            console.print(
+                "[yellow]Please run 'mrtrixBot-setup' to configure your API key.[/yellow]"
+            )
             sys.exit(1)
 
         genai.configure(api_key=gemini_key)
@@ -683,7 +692,8 @@ async def main():
                 pass
 
 
-if __name__ == "__main__":
+def run():
+    """Entry point for the mrtrixBot command."""
     # Save terminal settings at the very start
     original_settings = None
     try:
@@ -695,6 +705,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         # Exit silently on Ctrl+C or system exit
+        print()  # Print newline for clean terminal prompt
         pass
     except Exception:
         # Exit silently on any other exception during shutdown
@@ -713,7 +724,6 @@ if __name__ == "__main__":
         # Clean up stderr filter
         stderr_filter.stop()
 
-        # Force exit to avoid thread cleanup issues
-        import os
 
-        os._exit(0)
+if __name__ == "__main__":
+    run()

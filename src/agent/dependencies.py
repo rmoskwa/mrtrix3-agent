@@ -7,54 +7,82 @@ from typing import Optional
 import chromadb
 from chromadb.api import ClientAPI
 from dotenv import load_dotenv
+from platformdirs import user_data_dir, user_config_dir
 from supabase import Client, create_client
 
+from .config import (
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
+    EMBEDDING_MODEL,
+    EMBEDDING_DIMENSIONS,
+    APP_NAME,
+)
 from .models import SearchKnowledgebaseDependencies
 
 
 def validate_environment() -> dict:
     """
-    Validate required environment variables.
+    Validate required environment variables and configuration.
+
+    Loads configuration from (in order of priority, highest to lowest):
+    1. Environment variables already set (highest priority)
+    2. User config directory (~/.config/mrtrix3-agent/config or platform equivalent)
+    3. .env file in current directory (for development)
 
     Returns:
-        Dictionary of validated environment variables.
+        Dictionary containing:
+        - SUPABASE_URL, SUPABASE_KEY: Hardcoded read-only credentials
+        - GOOGLE_API_KEY: User-provided Gemini API key
+        - GOOGLE_API_KEY_EMBEDDING: Same as GOOGLE_API_KEY unless overridden
+        - EMBEDDING_MODEL, EMBEDDING_DIMENSIONS: Hardcoded values
+        - CHROMADB_PATH: Local storage path for ChromaDB
 
     Raises:
-        ValueError: If any required environment variable is missing or invalid.
+        ValueError: If GOOGLE_API_KEY is not found in any configuration source.
     """
-    load_dotenv()
+    # Get platform-specific config directory
+    config_dir = Path(user_config_dir(APP_NAME))
+    config_file = config_dir / "config"
 
-    required_vars = [
-        "SUPABASE_URL",
-        "SUPABASE_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_API_KEY_EMBEDDING",
-    ]
+    # Load from user config if it exists
+    if config_file.exists():
+        load_dotenv(config_file, override=False)
+
+    # Load from .env for development (lower priority)
+    load_dotenv(override=False)
 
     env_vars = {}
 
-    for var in required_vars:
+    # Use hardcoded Supabase credentials (read-only access)
+    env_vars["SUPABASE_URL"] = SUPABASE_URL
+    env_vars["SUPABASE_KEY"] = SUPABASE_ANON_KEY
+
+    # Only Google API keys need to be provided by the user
+    required_user_vars = [
+        "GOOGLE_API_KEY",
+    ]
+
+    for var in required_user_vars:
         value = os.getenv(var)
         if not value:
-            raise ValueError(f"Required environment variable {var} is not set")
+            error_msg = f"Required API key {var} is not set.\n\n"
+            error_msg += "Please run 'mrtrixBot-setup' to configure your API keys."
+            raise ValueError(error_msg)
         env_vars[var] = value
 
-    embedding_model = os.getenv("EMBEDDING_MODEL")
-    if embedding_model != "gemini-embedding-001":
-        raise ValueError(
-            f"EMBEDDING_MODEL must be 'gemini-embedding-001', got '{embedding_model}'"
-        )
-    env_vars["EMBEDDING_MODEL"] = embedding_model
+    # Use same key for embeddings if not separately provided
+    env_vars["GOOGLE_API_KEY_EMBEDDING"] = os.getenv(
+        "GOOGLE_API_KEY_EMBEDDING", env_vars["GOOGLE_API_KEY"]
+    )
 
-    embedding_dimensions = os.getenv("EMBEDDING_DIMENSIONS")
-    if embedding_dimensions != "768":
-        raise ValueError(
-            f"EMBEDDING_DIMENSIONS must be '768', got '{embedding_dimensions}'"
-        )
-    env_vars["EMBEDDING_DIMENSIONS"] = int(embedding_dimensions)
+    # Use hardcoded embedding configuration
+    env_vars["EMBEDDING_MODEL"] = EMBEDDING_MODEL
+    env_vars["EMBEDDING_DIMENSIONS"] = EMBEDDING_DIMENSIONS
 
     # Add ChromaDB storage path configuration
-    chromadb_path = os.getenv("CHROMADB_PATH", "~/.mrtrix3-agent/chromadb")
+    # Use platformdirs for data storage
+    default_chromadb_path = Path(user_data_dir(APP_NAME)) / "chromadb"
+    chromadb_path = os.getenv("CHROMADB_PATH", str(default_chromadb_path))
     env_vars["CHROMADB_PATH"] = os.path.expanduser(chromadb_path)
 
     return env_vars
