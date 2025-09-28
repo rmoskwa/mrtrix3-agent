@@ -40,6 +40,9 @@ class AsyncSearchKnowledgebaseDependencies(BaseModel):
         default_factory=lambda: os.getenv("EMBEDDING_MODEL"),
         description="Embedding model name",
     )
+    embedding_api_key: Optional[str] = Field(
+        default=None, description="Google API key for embeddings"
+    )
     embedding_service: Optional[SkipValidation[Any]] = Field(
         default=None, description="Cached embedding service instance"
     )
@@ -110,6 +113,11 @@ async def create_async_dependencies() -> AsyncSearchKnowledgebaseDependencies:
     Raises:
         ConnectionError: After 3 failed attempts to connect to Supabase
     """
+    # First validate environment to set up API keys
+    from .dependencies import validate_environment
+
+    env_vars = validate_environment()
+
     from .config import SUPABASE_URL, SUPABASE_ANON_KEY
 
     url = SUPABASE_URL
@@ -147,6 +155,7 @@ async def create_async_dependencies() -> AsyncSearchKnowledgebaseDependencies:
         chromadb_collection=chromadb_collection,
         chromadb_path=chromadb_path if chromadb_client else None,
         embedding_model=embedding_model,
+        embedding_api_key=env_vars.get("GOOGLE_API_KEY_EMBEDDING"),
         embedding_service=None,
         rate_limiter=None,
         config=None,

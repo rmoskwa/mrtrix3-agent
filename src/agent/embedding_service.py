@@ -29,7 +29,7 @@ class EmbeddingService:
             )
         api_key = api_key or os.getenv("GOOGLE_API_KEY_EMBEDDING")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY_EMBEDDING not found in environment")
+            raise ValueError("API key for embeddings not provided")
 
         genai.configure(api_key=api_key)
 

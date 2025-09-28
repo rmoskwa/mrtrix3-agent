@@ -193,8 +193,8 @@ def prettier_code_blocks():
             syntax = Syntax(
                 code,
                 self.lexer_name,
-                theme="None",
-                background_color="#0d1117",  # GitHub-style dark background
+                theme="monokai",  # Better contrast theme
+                background_color=None,  # Use terminal's native background
                 word_wrap=True,
                 line_numbers=False,
                 indent_guides=False,
@@ -509,8 +509,19 @@ async def start_conversation():
                         f"Checking {len(result.all_messages())} messages for complete response..."
                     )
 
-                    # Collect all text parts from the last assistant message(s)
-                    for idx, msg in enumerate(result.all_messages()):
+                    # Find where the NEW messages start (after the previous conversation_history)
+                    prev_history_length = (
+                        len(conversation_history) if conversation_history else 0
+                    )
+
+                    # Only process NEW messages from this conversation turn
+                    new_messages = result.all_messages()[prev_history_length:]
+                    logger.debug(
+                        f"Processing {len(new_messages)} new messages from current turn (skipping {prev_history_length} previous)"
+                    )
+
+                    # Collect text parts only from the NEW assistant message(s)
+                    for idx, msg in enumerate(new_messages):
                         msg_parts = []
                         if hasattr(msg, "parts"):
                             for part in msg.parts:
@@ -524,7 +535,7 @@ async def start_conversation():
                                         msg_parts.append(part.content)
                                         all_text_parts.append(part.content)
                                         logger.debug(
-                                            f"Message {idx} TextPart: {len(part.content)} chars"
+                                            f"New message {idx} TextPart: {len(part.content)} chars"
                                         )
 
                         # If this message had text parts, it's likely an assistant response
@@ -542,7 +553,7 @@ async def start_conversation():
 
                         # Combine ALL assistant message parts in order
                         all_parts_combined = []
-                        for msg_idx, parts in assistant_message_parts:
+                        for _, parts in assistant_message_parts:
                             all_parts_combined.extend(parts)
 
                         # Join all parts with proper spacing
@@ -605,7 +616,7 @@ async def start_conversation():
                         # Normal length - render with Markdown formatting
                         console.print(Markdown(full_response))
 
-                # Update conversation history
+                # Update conversation history with complete message list from result
                 conversation_history = result.all_messages()
 
                 # Add newline after response
@@ -629,6 +640,9 @@ async def start_conversation():
                 break  # Exit the loop cleanly
 
             except Exception as e:
+                # Log the actual error for debugging
+                logger.error(f"Error processing request: {e}", exc_info=True)
+
                 # Get user-friendly message
                 user_message = get_user_friendly_message(e, "processing your request")
                 console.print(f"\n[yellow]{user_message}[/yellow]\n")

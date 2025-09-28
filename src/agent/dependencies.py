@@ -78,9 +78,12 @@ def validate_environment() -> dict:
         value = os.getenv(var)
         if not value:
             error_msg = f"Required API key {var} is not set.\n\n"
-            error_msg += "Please run 'mrtrixBot-setup' to configure your API keys."
+            error_msg += "Please run 'setup-mrtrixbot' to configure your API keys."
             raise ValueError(error_msg)
         env_vars[var] = value
+
+        # Set it in the environment for PydanticAI to use
+        os.environ[var] = value
 
     # Use same key for embeddings if not separately provided
     env_vars["GOOGLE_API_KEY_EMBEDDING"] = os.getenv(
