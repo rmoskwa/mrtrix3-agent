@@ -4,6 +4,9 @@
 [![PydanticAI](https://img.shields.io/badge/PydanticAI-0.0.14-green.svg)](https://ai.pydantic.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+https://github.com/user-attachments/assets/0230bb50-9a90-453a-9c52-f0da3e75193a
+
+
 ## 📋 Prerequisites
 
 - Python 3.10 or higher
