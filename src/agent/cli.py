@@ -145,6 +145,7 @@ from src.agent.session_logger import (  # noqa: E402
     cleanup_session_logger,
 )
 from src.agent.slash_commands import SlashCommandHandler  # noqa: E402
+from src.agent.markdown_fixer import MarkdownCodeBlockFixer  # noqa: E402
 
 # Set up logging - only show warnings and above by default
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
@@ -430,6 +431,7 @@ async def start_conversation():
     agent = MRtrixAssistant(dependencies=deps)
     token_manager = TokenManager()
     slash_handler = SlashCommandHandler()
+    markdown_fixer = MarkdownCodeBlockFixer()
 
     # Display available commands at startup
     slash_handler.display_help()
@@ -612,6 +614,9 @@ async def start_conversation():
                 # Now display the complete response
                 # We have the full response, so we can render it properly with Markdown
                 if full_response:
+                    # Fix any markdown code block issues before rendering
+                    full_response = markdown_fixer.fix_markdown(full_response)
+
                     # Check if response is very long and might cause display issues
                     if len(full_response) > 5000:
                         # Split into chunks for very long responses
