@@ -6,17 +6,13 @@ import re
 class MarkdownCodeBlockFixer:
     """Fixes malformed code blocks in markdown content, especially those indented in lists."""
 
-    def __init__(self):
-        self.default_language = "bash"  # Default for MRtrix3 commands
-
     def fix_markdown(self, content: str) -> str:
         """Fix malformed code blocks in markdown content.
 
         The main issues we fix:
-        1. Code blocks indented as part of list items (move ``` to column 0)
-        2. Unclosed code blocks (missing closing ```)
-        3. Missing language specifier on opening ```
-        4. Code content that's indented within code blocks
+        1. Code blocks with indented ``` markers (move to column 0)
+        2. Unclosed code blocks (add closing ```)
+        3. List items with 4-space indentation that get treated as code blocks
 
         Args:
             content: Raw markdown content that may have malformed code blocks
@@ -30,58 +26,66 @@ class MarkdownCodeBlockFixer:
         lines = content.split("\n")
         fixed_lines = []
         in_code_block = False
-        code_block_lang = None
 
         for line in lines:
             # Check if this line contains a code fence (at any indentation level)
             stripped = line.strip()
 
-            if "```" in line:
-                # This line has a code fence - extract it
-                if stripped.startswith("```"):
-                    # Extract language if present
-                    lang = stripped[3:].strip()
-
-                    if not in_code_block:
-                        # Opening a code block
-                        in_code_block = True
-                        code_block_lang = lang if lang else self.default_language
-                        # Code fences should NOT be indented - put at column 0
-                        fixed_lines.append(f"```{code_block_lang}")
-                    else:
-                        # Closing a code block
-                        # Check if this might be trying to open a new block
-                        if lang and lang != code_block_lang:
-                            # Close current and open new
-                            fixed_lines.append("```")
-                            fixed_lines.append(f"```{lang}")
-                            code_block_lang = lang
-                        else:
-                            # Normal closing - put at column 0
-                            fixed_lines.append("```")
-                            in_code_block = False
-                            code_block_lang = None
+            if "```" in line and stripped.startswith("```"):
+                # This line has a code fence marker
+                if not in_code_block:
+                    # Opening a code block - put fence at column 0
+                    fixed_lines.append(stripped)
+                    in_code_block = True
                 else:
-                    # The ``` is not at the start of the stripped line
-                    # This might be inline or malformed - just pass through
-                    fixed_lines.append(line)
+                    # Closing a code block - put fence at column 0
+                    fixed_lines.append("```")
+                    in_code_block = False
             else:
                 # Regular content
                 if in_code_block:
-                    # Inside a code block - remove list indentation but preserve code structure
+                    # Inside a fenced code block - remove excess indentation
+                    # (code inside fenced blocks shouldn't be indented from list context)
                     if line.startswith("        "):
-                        # 8 spaces = list item indentation for code
+                        # 8+ spaces - likely list-indented code
                         fixed_lines.append(line[8:] if len(line) > 8 else "")
                     elif line.startswith("    "):
-                        # 4 spaces = could be list indentation or code indentation
-                        # Remove it for cleaner code blocks
+                        # 4 spaces - remove to clean up code
                         fixed_lines.append(line[4:] if len(line) > 4 else "")
                     else:
-                        # No indentation or other - pass through
                         fixed_lines.append(line)
                 else:
-                    # Not in code block - pass through as is
-                    fixed_lines.append(line)
+                    # Not in a fenced code block
+                    # Check if this line starts with 4+ spaces (would be treated as code block)
+                    if line.startswith("    "):
+                        # Count leading spaces
+                        space_count = len(line) - len(line.lstrip(" "))
+                        stripped_content = line.strip()
+
+                        # If it contains text that shouldn't be in a code block
+                        # (has markdown formatting, punctuation suggesting prose, etc.)
+                        if stripped_content and (
+                            "**" in stripped_content  # Bold markdown
+                            or "`" in stripped_content  # Inline code
+                            or stripped_content.startswith("*")  # List item
+                            or stripped_content.startswith("-")  # List item
+                            or stripped_content.startswith("+")  # List item
+                            or stripped_content.startswith("•")  # Bullet point
+                            or ". " in stripped_content  # Sentence
+                            or ", " in stripped_content
+                        ):  # Prose with commas
+                            # Reduce to 3 spaces to break code block interpretation
+                            # but maintain some indentation for readability
+                            if space_count >= 4:
+                                fixed_lines.append("   " + line.lstrip())
+                            else:
+                                fixed_lines.append(line)
+                        else:
+                            # Keep as-is - might be intentional code
+                            fixed_lines.append(line)
+                    else:
+                        # Pass through unchanged
+                        fixed_lines.append(line)
 
         # If we ended while still in a code block, close it
         if in_code_block:
@@ -89,7 +93,7 @@ class MarkdownCodeBlockFixer:
 
         result = "\n".join(fixed_lines)
 
-        # Clean up any empty code blocks
-        result = re.sub(r"```(\w+)\n```", "", result)
+        # Clean up any empty code blocks (```\n``` with nothing between)
+        result = re.sub(r"```[a-zA-Z]*\n```", "", result)
 
         return result
