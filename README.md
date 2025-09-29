@@ -4,8 +4,21 @@
 [![PydanticAI](https://img.shields.io/badge/PydanticAI-0.0.14-green.svg)](https://ai.pydantic.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## AI assistant for MRtrix3 documentation and workflow guidance in the terminal
+
 https://github.com/user-attachments/assets/0230bb50-9a90-453a-9c52-f0da3e75193a
 
+## How does the MRtrix3-agent work?
+
+This project serves as a simple implemention of Agentic AI knowledge base generation and retrieval. This foundation can be built on to implement custom workflows or transfer the framework to other documented software. The general structure of this repo is as follows:
+1. Official MRtrix3 documentation (latest version) is stored in a PostgreSQL database (Supabase)
+2. Users install a chromaDB locally which fetches documents from Supabase and stores them locally
+   - Upon every app startup, chromaDB checks itself against Supabase (ground truth) to determine if sync for up-to-date documentation is needed
+3. User chats with AI Agent (Gemini-2.5-flash)
+4. To provide accurate answers, AI Agent is equipped with a search tool to reference relevant and up-to-date documentation
+5. Monitoring and log collection is available and updated in real-time to view Agent queries and retrievals in real-time
+
+From this basic structure, additional tools or extensions to the AI Agent's capabilities can be easily added. As an example, the current version of the repo comes with 3 sample slash commands, one of which ("/sharefile") allows the user to share their file metadata with the Agent using MRtrix's 'mrinfo' for personalized guidance.
 
 ## 📋 Prerequisites
 
@@ -14,6 +27,23 @@ https://github.com/user-attachments/assets/0230bb50-9a90-453a-9c52-f0da3e75193a
   - The code currently only supports Gemini as Google offers a generous free tier for API calls.
   - Google API key can be generated from Google AI Studio, docs here: https://ai.google.dev/gemini-api/docs/api-key
 - Currently only tested on Linux systems
+
+## For Regular Use
+
+1. Install with pip
+```bash
+pip install mrtrix3-agent
+```
+
+2. Setup your API key (you will be prompted to enter)
+```bash
+setup-mrtrixbot
+```
+
+3. Run the agent and chat!
+```bash
+mrtrixbot
+```
 
 ## 🛠️ For Contributors/Developers
 
@@ -74,6 +104,8 @@ Or use the Python script directly:
 
 ```bash
 python src/agent/cli.py
+# or
+python -m src.agent.cli
 ```
 ## 📊 Monitoring
 
