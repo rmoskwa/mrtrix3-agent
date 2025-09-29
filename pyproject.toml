@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mrtrix3-agent"
-version = "1.0.9"
+version = "1.0.10"
 description = "MRtrix3 AI Agent"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,7 +47,7 @@ mrtrixbot = "src.agent.cli:run"
 setup-mrtrixbot = "src.agent.setup_config:setup_config"
 
 [tool.setuptools]
-packages = ["src.agent", "src.knowledge_base", "src.workflows", "src.workflows.sharefile"]
+packages = ["src", "src.agent", "src.knowledge_base", "src.workflows", "src.workflows.sharefile"]
 
 [tool.setuptools.package-data]
 "*" = ["*.py"]
