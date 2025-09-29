@@ -6,10 +6,11 @@ to autonomously retrieve MRtrix3 documentation context from the local ChromaDB
 database when needed to answer questions.
 """
 
+import asyncio
 import logging
 import re
 import json
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Tuple
 from pathlib import Path
 from pydantic_ai import RunContext, ModelRetry
 from .models import DocumentResult, SearchKnowledgebaseDependencies
@@ -47,105 +48,167 @@ async def search_knowledgebase(
         logger.warning("No queries provided")
         return []
 
-    all_results = []
-
-    # Process each query
-    for idx, original_query in enumerate(query_list):
-        # Input validation and sanitization
-        if not original_query or not original_query.strip():
+    # Filter out empty queries and prepare valid ones
+    valid_queries = []
+    for original_query in query_list:
+        if original_query and original_query.strip():
+            query = original_query.strip()[:500]  # Limit query length
+            sanitized_query = re.sub(
+                r"[^\w\s\-.,!?]", " ", query
+            )  # Keep alphanumeric and basic punctuation
+            valid_queries.append((original_query, sanitized_query))
+        else:
             logger.warning("Empty query in list, skipping")
-            continue
 
-        # Sanitize query - limit length and remove special characters that could be malicious
-        query = original_query.strip()[:500]  # Limit query length
-        sanitized_query = re.sub(
-            r"[^\w\s\-.,!?]", " ", query
-        )  # Keep alphanumeric and basic punctuation
+    if not valid_queries:
+        logger.warning("No valid queries after filtering")
+        return []
 
-        # Log the RAG search query using session logger
-        session_logger = get_session_logger()
-        if session_logger:
-            with session_logger.rag_search(sanitized_query):
-                pass  # Context manager handles logging
+    # Log sync status once
+    sync_status = _get_sync_status(ctx)
+    if sync_status:
+        logger.debug(
+            f"Database last synced: {sync_status.get('last_sync_time', 'unknown')}"
+        )
 
-        # Get sync status for context (only log once)
-        if idx == 0:
-            sync_status = _get_sync_status(ctx)
-            if sync_status:
-                logger.debug(
-                    f"Database last synced: {sync_status.get('last_sync_time', 'unknown')}"
-                )
+    # Create or get embedding service
+    if hasattr(ctx.deps, "embedding_service") and ctx.deps.embedding_service:
+        embedding_service = ctx.deps.embedding_service
+    else:
+        embedding_service = EmbeddingService(
+            ctx.deps.embedding_model,
+            api_key=getattr(ctx.deps, "embedding_api_key", None),
+        )
 
-        # Generate embedding for the agent's search query
-        try:
-            # Use embedding service from dependencies if available, otherwise create new
-            if hasattr(ctx.deps, "embedding_service") and ctx.deps.embedding_service:
-                embedding_service = ctx.deps.embedding_service
-            else:
-                embedding_service = EmbeddingService(
-                    ctx.deps.embedding_model,
-                    api_key=getattr(ctx.deps, "embedding_api_key", None),
-                )
-            embedding = await embedding_service.generate_embedding(sanitized_query)
-        except (TimeoutError, ConnectionError) as e:
-            logger.warning(
-                f"Embedding generation failed for query '{original_query}', will retry: {e}"
-            )
-            raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
-        except Exception as e:
-            logger.error(f"Permanent embedding error for query '{original_query}': {e}")
-            continue  # Skip this query, continue with others
+    # Process all queries in parallel
+    all_results = await _process_queries_parallel(ctx, valid_queries, embedding_service)
 
-        # Perform vector similarity search in ChromaDB
-        try:
-            query_results = await _search_chromadb_vector(
-                ctx, embedding, sanitized_query
-            )
+    return all_results
 
-            # Format results with query separators (use original query for display)
-            display_query = original_query.strip()[
-                :100
-            ]  # Truncate for display if very long
-            if query_results:
-                # Add query separator at the beginning
-                separator_start = f"--- Results from query: {display_query} ---"
-                separator_end = f"--- End of results from query: {display_query} ---"
 
-                # Combine all results for this query
-                combined_content = separator_start + "\n"
-                for result in query_results:
-                    combined_content += result.content + "\n"
-                combined_content += separator_end
+async def _process_queries_parallel(
+    ctx: RunContext[SearchKnowledgebaseDependencies],
+    valid_queries: List[Tuple[str, str]],
+    embedding_service: EmbeddingService,
+) -> List[DocumentResult]:
+    """
+    Process multiple queries in parallel for faster search.
 
-                # Create a single DocumentResult with all results for this query
-                all_results.append(
-                    DocumentResult(
-                        title=f"Results for query: {display_query}",
-                        content=combined_content,
-                    )
-                )
-            else:
-                # Even if no results, add a marker for this query
-                all_results.append(
-                    DocumentResult(
-                        title=f"No results for query: {display_query}",
-                        content=f"--- Results from query: {display_query} ---\nNo matching documents found.\n--- End of results from query: {display_query} ---",
-                    )
-                )
+    Args:
+        ctx: PydanticAI context with dependencies
+        valid_queries: List of (original_query, sanitized_query) tuples
+        embedding_service: Service for generating embeddings
 
-        except Exception as e:
-            logger.error(f"Vector search failed for query '{original_query}': {e}")
-            # Add a "no results" entry for failed searches
-            display_query = original_query.strip()[:100]
+    Returns:
+        List of DocumentResults for all queries
+    """
+    # Create tasks for each query
+    tasks = []
+    for original_query, sanitized_query in valid_queries:
+        task = _process_single_query(
+            ctx, original_query, sanitized_query, embedding_service
+        )
+        tasks.append(task)
+
+    # Execute all tasks concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results and handle exceptions
+    all_results = []
+    for idx, result in enumerate(results):
+        original_query, _ = valid_queries[idx]
+        display_query = original_query.strip()[:100]
+
+        if isinstance(result, Exception):
+            # Re-raise ModelRetry exceptions (they signal temporary failures needing retry)
+            if isinstance(result, ModelRetry):
+                raise result
+            # Handle other failed queries
+            logger.error(f"Query processing failed for '{original_query}': {result}")
             all_results.append(
                 DocumentResult(
                     title=f"No results for query: {display_query}",
                     content=f"--- Results from query: {display_query} ---\nNo matching documents found.\n--- End of results from query: {display_query} ---",
                 )
             )
-            continue  # Continue with other queries
+        else:
+            # Add successful result
+            all_results.append(result)
 
     return all_results
+
+
+async def _process_single_query(
+    ctx: RunContext[SearchKnowledgebaseDependencies],
+    original_query: str,
+    sanitized_query: str,
+    embedding_service: EmbeddingService,
+) -> DocumentResult:
+    """
+    Process a single query including embedding generation and search.
+
+    Args:
+        ctx: PydanticAI context with dependencies
+        original_query: Original query text for display
+        sanitized_query: Sanitized query for processing
+        embedding_service: Service for generating embeddings
+
+    Returns:
+        DocumentResult with search results for this query
+    """
+    # Log the RAG search query using session logger
+    session_logger = get_session_logger()
+    if session_logger:
+        with session_logger.rag_search(sanitized_query):
+            pass  # Context manager handles logging
+
+    # Generate embedding for the query
+    try:
+        embedding = await embedding_service.generate_embedding(sanitized_query)
+    except (TimeoutError, ConnectionError) as e:
+        logger.warning(
+            f"Embedding generation failed for query '{original_query}', will retry: {e}"
+        )
+        raise ModelRetry(f"Embedding generation temporarily failed: {e}") from e
+    except Exception as e:
+        logger.error(f"Permanent embedding error for query '{original_query}': {e}")
+        raise
+
+    # Perform vector similarity search in ChromaDB
+    try:
+        query_results = await _search_chromadb_vector(ctx, embedding, sanitized_query)
+
+        # Format results with query separators (use original query for display)
+        display_query = original_query.strip()[
+            :100
+        ]  # Truncate for display if very long
+
+        if query_results:
+            # Add query separator at the beginning
+            separator_start = f"--- Results from query: {display_query} ---"
+            separator_end = f"--- End of results from query: {display_query} ---"
+
+            # Combine all results for this query
+            combined_content = separator_start + "\n"
+            for result in query_results:
+                combined_content += result.content + "\n"
+            combined_content += separator_end
+
+            # Create a single DocumentResult with all results for this query
+            return DocumentResult(
+                title=f"Results for query: {display_query}",
+                content=combined_content,
+            )
+        else:
+            # Even if no results, add a marker for this query
+            return DocumentResult(
+                title=f"No results for query: {display_query}",
+                content=f"--- Results from query: {display_query} ---\nNo matching documents found.\n--- End of results from query: {display_query} ---",
+            )
+
+    except Exception as e:
+        logger.error(f"Vector search failed for query '{original_query}': {e}")
+        raise
 
 
 async def _search_chromadb_vector(

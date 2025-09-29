@@ -161,7 +161,9 @@ class TestRateLimiter:
         assert gemini_flash_limiter.rate == 30
         assert gemini_flash_limiter.per == 1.0
 
-        assert embedding_limiter.rate == 10
+        assert (
+            embedding_limiter.rate == 20
+        )  # Updated to match new rate limit for parallel processing
         assert embedding_limiter.per == 1.0
 
     @pytest.mark.asyncio

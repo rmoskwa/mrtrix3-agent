@@ -111,5 +111,5 @@ def rate_limited(limiter: RateLimiter):
 # Pre-configured rate limiters for different APIs
 gemini_flash_limiter = RateLimiter(rate=30, per=1.0)  # Gemini 2.5 Flash: 30 req/s
 embedding_limiter = RateLimiter(
-    rate=10, per=1.0
-)  # Conservative embedding rate: 10 req/s
+    rate=20, per=1.0
+)  # Increased embedding rate: 20 req/s for better parallel processing
