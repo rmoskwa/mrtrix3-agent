@@ -72,11 +72,15 @@ class TestMessageHistoryEndToEnd:
         slash_handler = SlashCommandHandler()
 
         # Simulate /sharefile command transforming input
-        with patch("subprocess.run") as mock_subprocess:
-            mock_result = Mock()
-            mock_result.returncode = 0
-            mock_result.stdout = "<user file information>\n{test: data}\n</user file information>\nHow to process?"
-            mock_subprocess.return_value = mock_result
+        with patch("src.workflows.sharefile.sharefile.main") as mock_sharefile_main:
+
+            def mock_main():
+                print(
+                    "<user file information>\n{test: data}\n</user file information>\nHow to process?"
+                )
+                raise SystemExit(0)
+
+            mock_sharefile_main.side_effect = mock_main
 
             command_result = slash_handler.process_command(
                 "/sharefile /test/file.nii How to process?"
@@ -203,7 +207,7 @@ class TestMessageHistoryEndToEnd:
             patch("src.agent.cli.ThreadPoolExecutor") as MockExecutor,
             patch("asyncio.get_event_loop") as mock_get_loop,
             patch("src.agent.cli.console"),
-            patch("subprocess.run") as mock_subprocess,
+            patch("src.workflows.sharefile.sharefile.main") as mock_sharefile_main,
             patch.dict(os.environ, {"COLLECT_LOGS": "false"}),
         ):
             # Setup basic CLI mocks
@@ -216,10 +220,13 @@ class TestMessageHistoryEndToEnd:
             mock_get_loop.return_value = mock_loop
 
             # Mock /sharefile subprocess call
-            mock_subprocess_result = Mock()
-            mock_subprocess_result.returncode = 0
-            mock_subprocess_result.stdout = "<user file information>\n{format: 'NIfTI'}\n</user file information>\nAnalyze this scan"
-            mock_subprocess.return_value = mock_subprocess_result
+            def sharefile_main_func():
+                print(
+                    "<user file information>\n{format: 'NIfTI'}\n</user file information>\nAnalyze this scan"
+                )
+                raise SystemExit(0)
+
+            mock_sharefile_main.side_effect = sharefile_main_func
 
             # Conversation: regular message, then /sharefile, then /exit
             conversation_inputs = [

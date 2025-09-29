@@ -3,7 +3,7 @@
 import shutil
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 import pytest
 
 from src.agent.slash_commands import SlashCommandHandler
@@ -38,17 +38,17 @@ class TestSharefileIntegration:
         file_path.write_text(content)
         return file_path
 
-    @patch("subprocess.run")
-    def test_sharefile_file_not_exists(self, mock_subprocess):
+    @patch("src.workflows.sharefile.sharefile.main")
+    def test_sharefile_file_not_exists(self, mock_sharefile_main):
         """Test /sharefile with non-existent file."""
         nonexistent_file = "/absolutely/nonexistent/path/file.nii"
 
-        # Mock subprocess to simulate file not found error from sharefile.py
-        mock_result = Mock()
-        mock_result.returncode = 1
-        mock_result.stdout = f"Error: Path '{nonexistent_file}' does not exist."
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
+        # Mock module to simulate file not found error from sharefile.py
+        def mock_main():
+            print(f"Error: Path '{nonexistent_file}' does not exist.")
+            raise SystemExit(1)
+
+        mock_sharefile_main.side_effect = mock_main
 
         with patch("src.agent.slash_commands.console") as mock_console:
             result = self.handler.process_command(
@@ -62,17 +62,17 @@ class TestSharefileIntegration:
             error_call = mock_console.print.call_args[0][0]
             assert "does not exist" in error_call
 
-    @patch("subprocess.run")
-    def test_sharefile_empty_output(self, mock_subprocess):
+    @patch("src.workflows.sharefile.sharefile.main")
+    def test_sharefile_empty_output(self, mock_sharefile_main):
         """Test /sharefile when sharefile returns empty output."""
         test_file = self.create_mock_nifti_file("test.nii")
 
         # Mock sharefile returning empty output - this is treated as success with empty content
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stderr = ""
-        mock_result.stdout = ""  # Empty output
-        mock_subprocess.return_value = mock_result
+        def mock_main():
+            print("")  # Empty output
+            raise SystemExit(0)
+
+        mock_sharefile_main.side_effect = mock_main
 
         result = self.handler.process_command(f"/sharefile {test_file} analyze")
 
@@ -81,23 +81,35 @@ class TestSharefileIntegration:
         assert result.agent_input == ""  # Empty output is passed through
 
     def test_sharefile_integration_with_real_script_path(self):
-        """Test that /sharefile correctly locates the sharefile.py script."""
-        # Verify the script path calculation matches what's expected
+        """Test that /sharefile correctly uses module import."""
+        # Verify that module import works correctly
         test_file = self.create_mock_nifti_file("test.nii")
+        captured_argv = None
 
-        with patch("subprocess.run") as mock_subprocess:
-            mock_result = Mock()
-            mock_result.returncode = 0
-            mock_result.stdout = "test output"
-            mock_subprocess.return_value = mock_result
+        with patch("src.workflows.sharefile.sharefile.main") as mock_sharefile_main:
 
-            self.handler.process_command(f"/sharefile {test_file} test query")
+            def mock_main():
+                import sys as sys_module
 
-            # Verify the script path used
-            call_args = mock_subprocess.call_args[0][0]
-            script_path_used = call_args[1]
+                nonlocal captured_argv
+                captured_argv = sys_module.argv.copy()
+                print("test output")
+                raise SystemExit(0)
 
-            # Should be the actual sharefile.py script
-            assert script_path_used.endswith("sharefile.py")
-            assert "workflows" in script_path_used
-            assert Path(script_path_used).exists()
+            mock_sharefile_main.side_effect = mock_main
+
+            result = self.handler.process_command(f"/sharefile {test_file} test query")
+
+            # Verify the command succeeded
+            assert result.success is True
+            assert result.continue_conversation is True
+            assert result.agent_input == "test output"
+
+            # Verify module was called
+            mock_sharefile_main.assert_called_once()
+
+            # Verify sys.argv was set correctly
+            assert captured_argv is not None
+            assert "sharefile" in captured_argv[0]  # Program name
+            assert str(test_file) in captured_argv[1]  # File path
+            assert "test query" == captured_argv[2]  # Query

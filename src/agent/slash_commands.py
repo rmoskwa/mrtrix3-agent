@@ -3,9 +3,6 @@ Slash command handlers for the MRtrix3 Assistant CLI.
 Provides modular command processing for extensibility.
 """
 
-import subprocess
-import sys
-from pathlib import Path
 from typing import Optional, Dict, Callable
 from rich.console import Console
 
@@ -133,37 +130,53 @@ class SlashCommandHandler:
         file_path = parts[0]
         user_query = parts[1]
 
-        # Build path to sharefile.py script
-        script_path = (
-            Path(__file__).parent.parent / "workflows" / "sharefile" / "sharefile.py"
-        )
-
         try:
-            # Execute the sharefile script with both filepath and query
-            result = subprocess.run(
-                [sys.executable, str(script_path), file_path, user_query],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            # Import and run the sharefile module directly instead of subprocess
+            # This ensures it works when installed via PyPI
+            from src.workflows.sharefile import sharefile
 
-            if result.returncode != 0:
-                # Script returned an error
-                console.print(f"[red]{result.stdout.strip()}[/red]")
-                return SlashCommandResult(success=False, continue_conversation=False)
+            # Call the main function directly with arguments
+            import sys as sys_module
 
-            # Script succeeded - use output as input to agent
-            prompt_content = result.stdout.strip()
-            return SlashCommandResult(
-                success=True, continue_conversation=True, agent_input=prompt_content
-            )
+            original_argv = sys_module.argv
+            try:
+                # Simulate command line arguments
+                sys_module.argv = ["sharefile", file_path, user_query]
 
-        except subprocess.TimeoutExpired:
-            console.print("[red]Error: File analysis timed out[/red]")
-            return SlashCommandResult(success=False, continue_conversation=False)
-        except FileNotFoundError:
+                # Capture stdout
+                from io import StringIO
+                import contextlib
+
+                stdout_capture = StringIO()
+                with contextlib.redirect_stdout(stdout_capture):
+                    # Run the sharefile main function
+                    exit_code = 0
+                    try:
+                        sharefile.main()
+                    except SystemExit as e:
+                        exit_code = e.code if e.code is not None else 0
+
+                output = stdout_capture.getvalue()
+
+                if exit_code != 0:
+                    # Script returned an error
+                    console.print(f"[red]{output.strip()}[/red]")
+                    return SlashCommandResult(
+                        success=False, continue_conversation=False
+                    )
+
+                # Script succeeded - use output as input to agent
+                prompt_content = output.strip()
+                return SlashCommandResult(
+                    success=True, continue_conversation=True, agent_input=prompt_content
+                )
+            finally:
+                # Restore original argv
+                sys_module.argv = original_argv
+
+        except ImportError:
             console.print(
-                f"[red]Error: sharefile.py script not found at {script_path}[/red]"
+                "[red]Error: sharefile module not found. Please ensure the package is properly installed.[/red]"
             )
             return SlashCommandResult(success=False, continue_conversation=False)
         except Exception as e:

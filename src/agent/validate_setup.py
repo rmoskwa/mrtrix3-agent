@@ -64,8 +64,7 @@ def check_setup() -> tuple[bool, str]:
         error_str = str(e).lower()
         if "invalid" in error_str or "api key" in error_str:
             return False, (
-                "Invalid Google API key.\n"
-                "Please run 'mrtrixBot-setup' to reconfigure."
+                "Invalid Google API key.\nPlease run 'setup-mrtrixbot' to reconfigure."
             )
         else:
             # Other errors might be transient, allow startup

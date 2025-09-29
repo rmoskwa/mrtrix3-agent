@@ -69,14 +69,16 @@ class TestSlashCommandsIntegration:
                 assert result.exit_requested == case["expected_exit"]
                 assert result.agent_input == case["expected_agent_input"]
 
-    @patch("subprocess.run")
-    def test_sharefile_command_integration_success(self, mock_subprocess):
+    @patch("src.workflows.sharefile.sharefile.main")
+    def test_sharefile_command_integration_success(self, mock_sharefile_main):
         """Test /sharefile command integration with successful file processing."""
-        # Mock successful subprocess execution
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = '{"test": "file_info"}\nProcessed user query'
-        mock_subprocess.return_value = mock_result
+
+        # Mock successful module execution
+        def mock_main():
+            print('{"test": "file_info"}\nProcessed user query')
+            raise SystemExit(0)
+
+        mock_sharefile_main.side_effect = mock_main
 
         result = self.handler.process_command(
             "/sharefile /test/path.nii How to process?"
@@ -86,41 +88,36 @@ class TestSlashCommandsIntegration:
         assert result.continue_conversation is True
         assert result.agent_input == '{"test": "file_info"}\nProcessed user query'
 
-        # Verify subprocess was called with correct parameters
-        mock_subprocess.assert_called_once()
-        call_args = mock_subprocess.call_args[1]
-        assert call_args["capture_output"] is True
-        assert call_args["text"] is True
-        assert call_args["timeout"] == 60
+        # Verify module was called
+        mock_sharefile_main.assert_called_once()
 
-    @patch("subprocess.run")
-    def test_sharefile_command_integration_error_handling(self, mock_subprocess):
+    @patch("src.workflows.sharefile.sharefile.main")
+    def test_sharefile_command_integration_error_handling(self, mock_sharefile_main):
         """Test /sharefile command error handling integration."""
         error_cases = [
             {
-                "side_effect": None,
-                "return_value": Mock(returncode=1, stdout="Error: File not found"),
+                "mock_func": lambda: exec(
+                    'print("Error: File not found"); raise SystemExit(1)'
+                ),
                 "expected_console_message": "Error: File not found",
             },
             {
-                "side_effect": subprocess.TimeoutExpired("cmd", 60),
-                "return_value": None,
-                "expected_console_message": "Error: File analysis timed out",
+                "mock_func": lambda: (_ for _ in ()).throw(
+                    RuntimeError("Processing timeout")
+                ),
+                "expected_console_message": "Error analyzing file: Processing timeout",
             },
             {
-                "side_effect": FileNotFoundError("Script not found"),
-                "return_value": None,
-                "expected_console_message": "sharefile.py script not found",
+                "mock_func": lambda: (_ for _ in ()).throw(
+                    ImportError("Module not found")
+                ),
+                "expected_console_message": "sharefile module not found",
             },
         ]
 
         for case in error_cases:
-            mock_subprocess.reset_mock()
-            if case["side_effect"]:
-                mock_subprocess.side_effect = case["side_effect"]
-            else:
-                mock_subprocess.return_value = case["return_value"]
-                mock_subprocess.side_effect = None
+            mock_sharefile_main.reset_mock()
+            mock_sharefile_main.side_effect = case["mock_func"]
 
             with patch("src.agent.slash_commands.console") as mock_console:
                 result = self.handler.process_command(

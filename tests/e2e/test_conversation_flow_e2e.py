@@ -21,7 +21,7 @@ class TestConversationFlowEndToEnd:
             patch("asyncio.get_event_loop") as mock_get_loop,
             patch("src.agent.cli.console"),
             patch("src.agent.slash_commands.console") as mock_slash_console,
-            patch("subprocess.run") as mock_subprocess,
+            patch("src.workflows.sharefile.sharefile.main") as mock_sharefile_main,
             patch.dict(os.environ, {"COLLECT_LOGS": "false"}),
         ):
             # Setup basic mocks
@@ -33,11 +33,14 @@ class TestConversationFlowEndToEnd:
             mock_loop = AsyncMock()
             mock_get_loop.return_value = mock_loop
 
-            # Mock /sharefile subprocess
-            mock_subprocess_result = Mock()
-            mock_subprocess_result.returncode = 0
-            mock_subprocess_result.stdout = '<user file information>\n{"format": "NIfTI"}\n</user file information>\n<user_provided_filepath>\n/data/dwi.nii\n</user_provided_filepath>\nHow should I preprocess this DWI data?'
-            mock_subprocess.return_value = mock_subprocess_result
+            # Mock /sharefile module
+            def sharefile_main_func():
+                print(
+                    '<user file information>\n{"format": "NIfTI"}\n</user file information>\n<user_provided_filepath>\n/data/dwi.nii\n</user_provided_filepath>\nHow should I preprocess this DWI data?'
+                )
+                raise SystemExit(0)
+
+            mock_sharefile_main.side_effect = sharefile_main_func
 
             # Complex conversation flow
             conversation_inputs = [
@@ -234,7 +237,7 @@ class TestConversationFlowEndToEnd:
             patch("asyncio.get_event_loop") as mock_get_loop,
             patch("src.agent.cli.console"),
             patch("src.agent.slash_commands.console"),
-            patch("subprocess.run") as mock_subprocess_global,
+            patch("src.workflows.sharefile.sharefile.main") as mock_sharefile_main,
             patch.dict(os.environ, {"COLLECT_LOGS": "false"}),
         ):
             mock_deps = AsyncMock()
@@ -258,46 +261,32 @@ class TestConversationFlowEndToEnd:
             sharefile_call_count = 0
 
             # Mock different /sharefile outputs for different files
-            def mock_subprocess_side_effect(*args, **kwargs):
+            def mock_sharefile_side_effect():
                 nonlocal sharefile_call_count
-                command_args = args[0]
+                sharefile_call_count += 1
 
-                # Convert to string if it's a list
-                command_str = (
-                    " ".join(command_args)
-                    if isinstance(command_args, list)
-                    else str(command_args)
-                )
+                # Check sys.argv to determine which file is being processed
+                import sys as sys_module
 
-                # Ignore lsb_release and other system calls
-                if "lsb_release" in command_str or "uname" in command_str:
-                    result = Mock()
-                    result.returncode = 0
-                    result.stdout = "Ubuntu 20.04"  # Mock system info
-                    return result
-
-                # Count sharefile calls
-                if "sharefile" in command_str:
-                    sharefile_call_count += 1
-
-                if "/data/anatomical.nii" in command_str:
-                    result = Mock()
-                    result.returncode = 0
-                    result.stdout = '<user file information>\n{"format": "NIfTI", "type": "T1"}\n</user file information>\n<user_provided_filepath>\n/data/anatomical.nii\n</user_provided_filepath>\nThis is a T1-weighted image, how should I segment it?'
-                    return result
-                elif "/data/dwi.nii" in command_str:
-                    result = Mock()
-                    result.returncode = 0
-                    result.stdout = '<user file information>\n{"format": "NIfTI", "type": "DWI"}\n</user file information>\n<user_provided_filepath>\n/data/dwi.nii\n</user_provided_filepath>\nHow should I process this DWI data for tractography?'
-                    return result
+                if len(sys_module.argv) > 1:
+                    if "/data/anatomical.nii" in sys_module.argv[1]:
+                        print(
+                            '<user file information>\n{"format": "NIfTI", "type": "T1"}\n</user file information>\n<user_provided_filepath>\n/data/anatomical.nii\n</user_provided_filepath>\nThis is a T1-weighted image, how should I segment it?'
+                        )
+                        raise SystemExit(0)
+                    elif "/data/dwi.nii" in sys_module.argv[1]:
+                        print(
+                            '<user file information>\n{"format": "NIfTI", "type": "DWI"}\n</user file information>\n<user_provided_filepath>\n/data/dwi.nii\n</user_provided_filepath>\nHow should I process this DWI data for tractography?'
+                        )
+                        raise SystemExit(0)
+                    else:
+                        print("Error: Unexpected file path")
+                        raise SystemExit(1)
                 else:
-                    # Default fallback to prevent None returns
-                    result = Mock()
-                    result.returncode = 1
-                    result.stdout = "Error: Unexpected file path"
-                    return result
+                    print("Error: No file path provided")
+                    raise SystemExit(1)
 
-            mock_subprocess_global.side_effect = mock_subprocess_side_effect
+            mock_sharefile_main.side_effect = mock_sharefile_side_effect
 
             with (
                 patch("src.agent.cli.MRtrixAssistant") as MockAssistant,
