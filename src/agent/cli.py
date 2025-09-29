@@ -17,6 +17,7 @@ from pathlib import Path
 import threading
 import select
 import termios
+import signal
 
 try:
     import readline  # Enable readline support for arrow keys
@@ -118,6 +119,9 @@ class StderrFilter:
 
 # Create global stderr filter instance (but don't start it yet)
 stderr_filter = StderrFilter()
+
+# Global terminal settings for restoration
+_original_terminal_settings = None
 
 # Now safe to import other modules that may use environment variables
 import google.generativeai as genai  # noqa: E402
@@ -244,11 +248,28 @@ async def get_user_input(loop, executor) -> str:
     sys.stdout.flush()  # Ensure prompt is visible before input
 
     try:
-        user_input = await loop.run_in_executor(executor, input)
+        # Create a future for the input operation
+        future = loop.run_in_executor(executor, input)
+        user_input = await future
         return user_input
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        # Handle interruption gracefully
-        raise KeyboardInterrupt()
+    except (KeyboardInterrupt, asyncio.CancelledError, GeneratorExit):
+        # Cancel the future if it's still running
+        if not future.done():
+            future.cancel()
+        # Restore terminal before exit using global settings
+        print()  # New line for clean exit
+        global _original_terminal_settings
+        if _original_terminal_settings:
+            try:
+                termios.tcsetattr(
+                    sys.stdin, termios.TCSANOW, _original_terminal_settings
+                )
+                sys.stdout.write("\033[0m")  # Reset all attributes
+                sys.stdout.flush()
+            except Exception:
+                pass
+        # Force immediate exit on Ctrl+C
+        os_module._exit(0)
 
 
 class TokenManager:
@@ -416,8 +437,14 @@ async def start_conversation():
     # Conversation history for maintaining context
     conversation_history = []
 
-    # Create a thread pool executor for input handling
-    executor = ThreadPoolExecutor(max_workers=1)
+    # Create a thread pool executor for input handling with daemon threads
+    # Daemon threads will automatically terminate when main program exits
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="input-thread")
+    # Make the thread a daemon thread
+    for thread in threading.enumerate():
+        if thread.name.startswith("input-thread"):
+            thread.daemon = True
+
     loop = asyncio.get_event_loop()
 
     try:
@@ -648,7 +675,12 @@ async def start_conversation():
                 console.print(f"\n[yellow]{user_message}[/yellow]\n")
 
     finally:
-        # Properly shutdown the executor
+        # Force immediate shutdown of the executor without waiting
+        try:
+            executor._threads.clear()
+            threading._threads_queues.clear()
+        except Exception:
+            pass
         executor.shutdown(wait=False, cancel_futures=True)
 
         # Cleanup resources properly
@@ -678,10 +710,12 @@ async def main():
         console.print(f"[red]❌ Setup Error:[/red] {message}")
         sys.exit(1)
 
-    # Save original terminal settings
+    # Save original terminal settings (also store globally)
+    global _original_terminal_settings
     original_term_settings = None
     try:
         original_term_settings = termios.tcgetattr(sys.stdin)
+        _original_terminal_settings = original_term_settings  # Store globally
     except (OSError, termios.error):
         pass  # Not a terminal or termios not available
 
@@ -711,12 +745,34 @@ async def main():
 
 def run():
     """Entry point for the mrtrixBot command."""
-    # Save terminal settings at the very start
-    original_settings = None
+    # Save terminal settings at the very start (before signal handler)
+    global _original_terminal_settings
     try:
-        original_settings = termios.tcgetattr(sys.stdin)
+        _original_terminal_settings = termios.tcgetattr(sys.stdin)
     except (OSError, termios.error):
         pass
+
+    # Set up signal handler for immediate exit on SIGINT
+    def signal_handler(_signum, _frame):
+        print()  # New line for clean exit
+        # Restore terminal settings before exit
+        if _original_terminal_settings:
+            try:
+                termios.tcsetattr(
+                    sys.stdin, termios.TCSANOW, _original_terminal_settings
+                )
+                sys.stdout.write("\033[0m")  # Reset all attributes
+                sys.stdout.flush()
+            except Exception:
+                pass
+        # Stop stderr filter
+        try:
+            stderr_filter.stop()
+        except Exception:
+            pass
+        os_module._exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
 
     try:
         asyncio.run(main())
@@ -732,9 +788,11 @@ def run():
         pass
     finally:
         # Restore terminal settings before any cleanup
-        if original_settings:
+        if _original_terminal_settings:
             try:
-                termios.tcsetattr(sys.stdin, termios.TCSANOW, original_settings)
+                termios.tcsetattr(
+                    sys.stdin, termios.TCSANOW, _original_terminal_settings
+                )
                 # Also reset terminal to sane state
                 sys.stdout.write("\033[0m")  # Reset all attributes
                 sys.stdout.flush()
