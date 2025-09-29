@@ -675,9 +675,32 @@ async def start_conversation():
                 # Log the actual error for debugging
                 logger.error(f"Error processing request: {e}", exc_info=True)
 
-                # Get user-friendly message
-                user_message = get_user_friendly_message(e, "processing your request")
-                console.print(f"\n[yellow]{user_message}[/yellow]\n")
+                # Check for our wrapped Gemini 500 error from agent.py
+                if isinstance(
+                    e, RuntimeError
+                ) and "Gemini API returned 500 error" in str(e):
+                    console.print(
+                        "\n[yellow]I'm specialized in MRtrix3 neuroimaging documentation. "
+                        "I can help you with MRtrix3 commands, neuroimaging workflows, "
+                        "brain imaging analysis, and related technical topics. "
+                        "Please ask me something about MRtrix3 or neuroimaging![/yellow]\n"
+                    )
+                # Check for raw Gemini API 500 errors
+                elif (
+                    "500 INTERNAL" in str(e) or "500" in str(e) and "INTERNAL" in str(e)
+                ):
+                    console.print(
+                        "\n[yellow]I encountered an issue processing your request. "
+                        "I'm specialized in MRtrix3 neuroimaging documentation. "
+                        "Please ask me about MRtrix3 commands, neuroimaging workflows, "
+                        "or brain imaging topics![/yellow]\n"
+                    )
+                else:
+                    # Get user-friendly message for other errors
+                    user_message = get_user_friendly_message(
+                        e, "processing your request"
+                    )
+                    console.print(f"\n[yellow]{user_message}[/yellow]\n")
 
     finally:
         # Force immediate shutdown of the executor without waiting
