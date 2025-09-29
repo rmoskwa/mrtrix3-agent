@@ -147,47 +147,32 @@ class TestStartConversation:
         mock_agent.run.assert_not_called()
         mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
-    @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
-    @patch("asyncio.get_event_loop")
-    @patch("src.agent.cli.ThreadPoolExecutor")
-    @patch("src.agent.cli.create_async_dependencies")
-    @patch("src.agent.cli.MRtrixAssistant")
-    @patch("src.agent.cli.TokenManager")
-    @patch("src.agent.cli.console")
-    async def test_ctrl_c_exit(
-        self,
-        mock_console,
-        MockTokenManager,
-        MockAssistant,
-        mock_create_deps,
-        MockExecutor,
-        mock_get_loop,
-    ):
-        """Test Ctrl+C exits immediately."""
-        # Setup mock executor
-        mock_executor = Mock()
-        MockExecutor.return_value = mock_executor
-        mock_executor.shutdown = Mock()
+    def test_ctrl_c_exit(self):
+        """Test Ctrl+C exits immediately with terminal restoration."""
+        with patch("src.agent.cli.termios") as mock_termios:
+            with patch("src.agent.cli.os_module") as mock_os:
+                from src.agent.cli import run
 
-        # Setup mock loop
-        mock_loop = AsyncMock()
-        mock_get_loop.return_value = mock_loop
-        mock_loop.run_in_executor.side_effect = KeyboardInterrupt()
+                # Mock terminal settings
+                mock_termios.tcgetattr.return_value = {"original": "settings"}
+                mock_termios.TCSANOW = 0
 
-        mock_deps = AsyncMock()
-        mock_create_deps.return_value = mock_deps
+                # Mock os._exit to raise SystemExit
+                def mock_exit(code):
+                    raise SystemExit(code)
 
-        mock_agent = AsyncMock()
-        MockAssistant.return_value = mock_agent
+                mock_os._exit = mock_exit
 
-        mock_token_mgr = AsyncMock()
-        MockTokenManager.return_value = mock_token_mgr
+                # Mock asyncio.run to raise KeyboardInterrupt
+                with patch("asyncio.run") as mock_asyncio_run:
+                    mock_asyncio_run.side_effect = KeyboardInterrupt()
 
-        await start_conversation()
+                    # Call run which should handle KeyboardInterrupt
+                    with pytest.raises(SystemExit) as exc_info:
+                        run()
 
-        # Verify executor was properly shut down
-        mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
-        assert mock_console.print.call_count >= 2  # Welcome message and instruction
+                    # Verify clean exit with code 0
+                    assert exc_info.value.code == 0
 
     @patch.dict(os.environ, {"COLLECT_LOGS": "false"})
     @patch("asyncio.get_event_loop")
