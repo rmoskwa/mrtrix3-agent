@@ -31,6 +31,3 @@ metrics/
 dist/
 build/
 *.whl
-
-# User configuration (created by mrtrixBot-setup)
-# Note: .env is already ignored above for development
